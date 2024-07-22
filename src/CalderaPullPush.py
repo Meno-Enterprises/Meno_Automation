@@ -78,7 +78,7 @@ def pullPush(urlPrinter, lastPull):
     return spoolerJson
 
 
-time.sleep(30)
+time.sleep(30) # Gives a little time for the Caldera API to launch.
 
 # Loops endlessly, delayed by whatever pullTimer is set to. Add new lines here for new Printers
 while True:
