@@ -2,8 +2,10 @@
 # Script to pull Spooler data from a local Caldera server, and sending it to a dedicated webhook.
 #
 #
+import gc
 
 import requests
+from datetime import datetime
 import time
 
 pullTimer = 60  # seconds
@@ -11,30 +13,42 @@ idPrinter1 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC
 idPrinter2 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1C'  # Epson B
 ip1 = '192.168.0.39'  # Dell PC IP
 # ip2 = '192.168.0.151'  # Alienware, currently not relevant
-hostIP = ip1  # Change which Caldera API gets pulled from here.
 pullStore1 = {}
-pullStore2 = {} # If adding additional printers, add more of these variables.
+pullStore2 = {}  # If adding additional printers, add more of these variables.
 webhookURL = 'https://hook.us1.make.com/7c5fomyqgiuaodfakepg13ty3rxxikmz'
-urlPrinter1 = 'http://' + hostIP + ':12340/v1/jobs?idents.device=' + idPrinter1 + '&name=Autonest*&sort=idents.internal' \
-                                                                                  ':desc&state=pending|finished'
-urlPrinter2 = 'http://' + hostIP + ':12340/v1/jobs?idents.device=' + idPrinter2 + '&name=Autonest*&sort=idents.internal' \
-                                                                                  ':desc&state=pending|finished'
+urlPrinter1 = 'http://' + ip1 + ':12340/v1/jobs?idents.device=' + idPrinter1 + '&name=Autonest*&sort=idents.internal' \
+                                                                               ':desc&state=pending|finished&limit=5'
+urlPrinter2 = 'http://' + ip1 + ':12340/v1/jobs?idents.device=' + idPrinter2 + '&name=Autonest*&sort=idents.internal' \
+                                                                               ':desc&state=pending|finished&limit=5'
+loopCount = 0
 
 
 # Sends pulled JSON data to the provided webhook. Bad requests will continue to retry until successful.
 def sendRequest(webhookR, i):
+    postReq = []
+    error = False  # try/catch flag for post timeout.
+    request = [x for x in webhookR if  # Filter nests that are older than 3 days.
+               (datetime.today() - datetime.fromisoformat(x["form"]["evolution"]["creation"][0:10])).days < 3]
+    # request = [y for y in request if "/MENO/Hotfolders/" in y["form"]["origin"]["input"]["file"]]
+
     print("Sending data to webhook...")
-    postReq = requests.post(webhookURL, json=webhookR, timeout=30)
-    if (postReq.status_code != requests.codes.ok) and (i <= 5):
-        print(str(postReq.status_code) + ": Attempt " + i + ". Trying again in " + i * 15 + " seconds.\n")
+    try:
+        postReq = requests.post(webhookURL, json=request, timeout=30)  # Makes the post request to the webhook.
+    except Exception as e:
+        error = True
+
+    # If an error is returned, wait a bit before retrying.
+    if ((postReq.status_code != requests.codes.ok) and (i <= 5)) or error:
+        print(str(postReq.status_code) + ": Attempt " + str(i) + ". Trying again in " + str(i * 15) + " seconds.\n")
         time.sleep(i * 15)
         print("Retrying...")
         i = i + 1
         sendRequest(webhookR, i)
-    elif (postReq.status_code != requests.codes.ok) and (i > 5):
+    elif ((postReq.status_code != requests.codes.ok) and (i > 5)) or error:
         print(
-            str(postReq.status_code) + ": Attempt " + i + ". Check to see if the Caldera API is running.\nTrying again "
-                                                          "in 120 seconds.\n")
+            str(postReq.status_code) + ": Attempt " + str(
+                i) + ". Check to see if the Caldera API is running.\nTrying again "
+                     "in 120 seconds.\n")
         time.sleep(120)
         print("Retrying...")
         i = i + 1
@@ -45,15 +59,22 @@ def sendRequest(webhookR, i):
 
 # Makes a get request to the provided URL. Bad requests will continue to retry until successful.
 def getRequest(urlRequest, i):
-    print("Pulling " + urlRequest)
-    getReq = requests.get(urlRequest)
-    if (getReq.status_code != requests.codes.ok) and (i <= 5):
+    getReq = []
+    error = False  # try/catch flag for get timeout.
+
+    try:
+        getReq = requests.get(urlRequest)  # Makes the get request to the Caldera API.
+    except Exception as e:
+        error = True
+
+    # If an error is returned, wait a bit before retrying.
+    if ((getReq.status_code != requests.codes.ok) and (i <= 5)) or error:
         print(str(getReq.status_code) + ": Attempt " + i + ". Trying again in " + i * 15 + " seconds.\n")
         time.sleep(i * 15)
         print("Retrying...")
         i = i + 1
         getReq = getRequest(urlRequest, i)
-    elif (getReq.status_code != requests.codes.ok) and (i > 5):
+    elif ((getReq.status_code != requests.codes.ok) and (i > 5)) or error:
         print(
             str(getReq.status_code) + ": Attempt " + i + ". Check to see if the Caldera API is running.\nTrying again "
                                                          "in 120 seconds.\n")
@@ -61,8 +82,7 @@ def getRequest(urlRequest, i):
         print("Retrying...")
         i = i + 1
         getReq = getRequest(urlRequest, i)
-    else:
-        print("Pull successful.")
+
     return getReq
 
 
@@ -71,18 +91,20 @@ def pullPush(urlPrinter, lastPull):
     r = getRequest(urlPrinter, 1)
     spoolerJson = r.json()
     if lastPull != spoolerJson:
+        # print(spoolerJson)
         print("New data detected, sending to server.\n")
         sendRequest(spoolerJson, 1)
-    else:
-        print("No update.\n")
     return spoolerJson
 
 
-time.sleep(30) # Gives a little time for the Caldera API to launch.
-
+time.sleep(1)  # Gives a little time for the Caldera API to launch.
+gc.enable()
 # Loops endlessly, delayed by whatever pullTimer is set to. Add new lines here for new Printers
 while True:
-    pullStore1 = pullPush(urlPrinter1, pullStore1) # Epson A
-    pullStore2 = pullPush(urlPrinter2, pullStore2) # Epson B
+    pullStore2 = pullPush(urlPrinter2, pullStore2)  # Epson B
+    pullStore1 = pullPush(urlPrinter1, pullStore1)  # Epson A
     time.sleep(pullTimer)
-
+    loopCount = loopCount + 1
+    if loopCount > 180:
+        gc.collect()
+        loopCount = 0
