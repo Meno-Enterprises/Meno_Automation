@@ -37,24 +37,29 @@ def sendRequest(webhookR, i):
     except Exception as e:
         error = True
 
-    # If an error is returned, wait a bit before retrying.
-    if ((postReq.status_code != requests.codes.ok) and (i <= 5)) or error:
-        print(str(postReq.status_code) + ": Attempt " + str(i) + ". Trying again in " + str(i * 15) + " seconds.\n")
+    try:
+        # If an error is returned, wait a bit before retrying.
+        if ((postReq.status_code != requests.codes.ok) and (i <= 5)) or error:
+            print(str(postReq.status_code) + ": Attempt " + str(i) + ". Trying again in " + str(i * 15) + " seconds.\n")
+            time.sleep(i * 15)
+            print("Retrying...")
+            i = i + 1
+            sendRequest(webhookR, i)
+        elif ((postReq.status_code != requests.codes.ok) and (i > 5)) or error:
+            print(
+                str(postReq.status_code) + ": Attempt " + str(
+                    i) + ". Check to see if the Caldera API is running.\nTrying again "
+                         "in 120 seconds.\n")
+            time.sleep(120)
+            print("Retrying...")
+            i = i + 1
+            sendRequest(webhookR, i)
+        else:
+            print(str(postReq.status_code) + " Sent successfully.")
+    except AttributeError:
         time.sleep(i * 15)
-        print("Retrying...")
         i = i + 1
         sendRequest(webhookR, i)
-    elif ((postReq.status_code != requests.codes.ok) and (i > 5)) or error:
-        print(
-            str(postReq.status_code) + ": Attempt " + str(
-                i) + ". Check to see if the Caldera API is running.\nTrying again "
-                     "in 120 seconds.\n")
-        time.sleep(120)
-        print("Retrying...")
-        i = i + 1
-        sendRequest(webhookR, i)
-    else:
-        print(str(postReq.status_code) + " Sent successfully.")
 
 
 # Makes a get request to the provided URL. Bad requests will continue to retry until successful.
