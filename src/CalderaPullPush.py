@@ -23,6 +23,7 @@ urlPrinter2 = 'http://' + ip1 + ':12340/v1/jobs?idents.device=' + idPrinter2 + '
 loopCount = 0
 
 
+# This will soon be made redundant. We will soon skip sending data to the webhook and instead process the data and send it directly to Notion.
 # Sends pulled JSON data to the provided webhook. Bad requests will continue to retry until successful.
 def sendRequest(webhookR, i):
     postReq = []
@@ -75,21 +76,24 @@ def getRequest(urlRequest, i):
     except Exception as e:
         error = True
 
-    # If an error is returned, wait a bit before retrying.
-    if ((getReq.status_code != requests.codes.ok) and (i <= 5)) or error:
-        print(str(datetime.now().strftime("%H:%M:%S")) + " - " + str(getReq.status_code) + ": Fetch Attempt " + i + ". Trying again in " + i * 15 + " seconds.\n")
-        time.sleep(i * 15)
-        print("Retrying...")
-        i = i + 1
-        getReq = getRequest(urlRequest, i)
-    elif ((getReq.status_code != requests.codes.ok) and (i > 5)) or error:
-        print(str(datetime.now().strftime("%H:%M:%S")) + " - " + 
-            str(getReq.status_code) + ": Fetch Attempt " + i + ". Check to see if the Caldera API is running.\nTrying again "
-                                                         "in 120 seconds.\n")
-        time.sleep(120)
-        print(str(datetime.now().strftime("%H:%M:%S")) + " - " + "Retrying...")
-        i = i + 1
-        getReq = getRequest(urlRequest, i)
+    try:
+        # If an error is returned, wait a bit before retrying.
+        if ((getReq.status_code != requests.codes.ok) and (i <= 5)) or error:
+            print(str(datetime.now().strftime("%H:%M:%S")) + " - " + str(getReq.status_code) + ": Fetch Attempt " + i + ". Trying again in " + i * 15 + " seconds.\n")
+            time.sleep(i * 15)
+            print("Retrying...")
+            i = i + 1
+            getReq = getRequest(urlRequest, i)
+        elif ((getReq.status_code != requests.codes.ok) and (i > 5)) or error:
+            print(str(datetime.now().strftime("%H:%M:%S")) + " - " + 
+                str(getReq.status_code) + ": Fetch Attempt " + i + ". Check to see if the Caldera API is running.\nTrying again "
+                                                            "in 120 seconds.\n")
+            time.sleep(120)
+            print(str(datetime.now().strftime("%H:%M:%S")) + " - " + "Retrying...")
+            i = i + 1
+            getReq = getRequest(urlRequest, i)
+    except AttributeError as e:
+        print(str(e) + " Caldera API is not running.")
 
     return getReq
 
