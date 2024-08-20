@@ -1,0 +1,5 @@
+{
+    "Authorization": "{api key}",
+    "Notion-Version": "2022-06-28",
+    "Content-Type": "application/json"
+}
