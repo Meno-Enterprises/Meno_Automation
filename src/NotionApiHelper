@@ -14,28 +14,29 @@ class NotionApiHelper:
         self.endPoint = "https://api.notion.com/v1"
         self.counter = 0
 
-    """
-    Sends a post request to a specified Notion database, returning the response as a JSON object. Will return {} if the request fails.
-    query(string, list(opt.), dict(opt.),int(opt.)) -> dict
-
-        Args:
-            databaseID (str): The ID of the Notion database.
-            filter_properties (list): Filter properties as a list of strings. Optional.
-                Can be used to filter which page properties are returned in the response.
-                Example: ["%7ChE%7C", "NPnZ", "%3F%5BWr"]
-            content_filter (dict): Content filter as a JSON object. Optional.
-                Can be used to filter pages based on the specified properties.
-                Example: {"property":"Name","rich_text":{"contains":"Autonest #192"}}
-            page_num (int): The number of pages to retrieve. Optional.
-                If not specified, all pages will be retrieved.
-
-        Returns:
-            dict: The JSON response from the Notion API.
-
-    Additional information on content filters can be found at https://developers.notion.com/reference/post-database-query-filterthe-filter-object
-    Additional information on Notion queries can be found at https://developers.notion.com/reference/post-database-query
-    """
+    
     def query(self, databaseID, filter_properties = None, content_filter = None, page_num = None):
+        """
+        Sends a post request to a specified Notion database, returning the response as a JSON object. Will return {} if the request fails.
+        query(string, list(opt.), dict(opt.),int(opt.)) -> dict
+
+            Args:
+                databaseID (str): The ID of the Notion database.
+                filter_properties (list): Filter properties as a list of strings. Optional.
+                    Can be used to filter which page properties are returned in the response.
+                    Example: ["%7ChE%7C", "NPnZ", "%3F%5BWr"]
+                content_filter (dict): Content filter as a JSON object. Optional.
+                    Can be used to filter pages based on the specified properties.
+                    Example: {"property":"Name","rich_text":{"contains":"Autonest #192"}}
+                page_num (int): The number of pages to retrieve. Optional.
+                    If not specified, all pages will be retrieved.
+
+            Returns:
+                dict: The JSON response from the Notion API.
+
+        Additional information on content filters can be found at https://developers.notion.com/reference/post-database-query-filterthe-filter-object
+        Additional information on Notion queries can be found at https://developers.notion.com/reference/post-database-query
+        """
         databaseJson = {}
         get_all = page_num is None
         page_size = self.PAGE_SIZE if get_all else page_num
@@ -89,9 +90,37 @@ class NotionApiHelper:
                 time.sleep(3)
                 return {}
 
-    def fetch_results(self):
-        # Method code here
-        pass
+    def get_object(self, databaseID):
+        """
+        Sends a get request to a specified Notion database, returning the response as a JSON object. Will return {} if the request fails.
+        
+        get_object(string) -> dict
+
+            Args:
+                databaseID (str): The ID of the Notion database.
+
+            Returns:
+                dict: The JSON response from the Notion API.
+        """
+        try:
+            time.sleep(0.5) # To avoid rate limiting
+            response = requests.get(f"{self.endPoint}/databases/{databaseID}", headers=self.headers)
+            response.raise_for_status()
+            self.counter = 0
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            if self.counter < self.MAX_RETRIES:
+                logging.error(f"Network error occurred: {e}. Trying again in {self.RETRY_DELAY} seconds.")
+                time.sleep(self.RETRY_DELAY)
+                self.counter += 1
+                databaseJson = self.get_object(databaseID)
+            else:    
+                logging.error(f"Network error occurred too many times: {e}")
+                time.sleep(3)
+                self.counter = 0
+                return {}
+        
+
 
     def close_connection(self):
         # Method code here
