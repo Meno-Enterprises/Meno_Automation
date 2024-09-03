@@ -30,24 +30,40 @@ class NotionApiHelper:
                     Example: ["%7ChE%7C", "NPnZ", "%3F%5BWr"]
                 content_filter (dict): Content filter as a JSON object. Optional.
                     Can be used to filter pages based on the specified properties.
-                    Example: {"property":"Name","rich_text":{"contains":"Autonest #192"}}
+                    Example: 
+                        {
+                            "and": [
+                                {
+                                    "property": "Job status",
+                                    "select": {
+                                        "does_not_equal": "Canceled"
+                                    }
+                                },
+                                {
+                                    "property": "Created",
+                                    "date": {
+                                        "past_week": {}
+                                    }
+                                }
+                            ]
+                        }
                 page_num (int): The number of pages to retrieve. Optional.
                     If not specified, all pages will be retrieved.
 
             Returns:
                 dict: The JSON response from the Notion API.
 
-        Additional information on content filters can be found at https://developers.notion.com/reference/post-database-query-filterthe-filter-object
+        Additional information on content filters can be found at https://developers.notion.com/reference/post-database-query-filter#the-filter-object
         Additional information on Notion queries can be found at https://developers.notion.com/reference/post-database-query
         """
         databaseJson = {}
         get_all = page_num is None
         page_size = self.PAGE_SIZE if get_all else page_num
         bodyJson = {"page_size": page_size, "filter": content_filter} if content_filter else {"page_size": page_size}
-        filter_properties = "?filter_properties=" + "?filter_properties=".join(filter_properties) if filter_properties else ""
-       
+        filter_properties = "?filter_properties=" + "&filter_properties=".join(filter_properties) if filter_properties else ""
         databaseJson = self._make_query_request(databaseID, filter_properties, bodyJson)
         if not databaseJson:
+            print("No data returned.")
             self.counter = 0
             return {}
 

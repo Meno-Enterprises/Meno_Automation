@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Force Label Button Page</title>
+</head>
+<body>
+    <button onclick="sendAction()">Force Labels</button>
+
+    <script>
+        function sendAction() {
+            fetch('https://hook.us1.make.com/v9v3wihe35d0hjm4ljpcwcxndp46t103', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ action: 'Hello World' })
+            })
+            .then(response => {
+                // Handle the response from the webhook
+                console.log('Action sent successfully');
+            })
+            .catch(error => {
+                console.error('Error sending action:', error);
+            });
+        }
+    </script>
+</body>
+</html>
