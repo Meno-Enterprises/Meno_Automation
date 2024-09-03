@@ -3,23 +3,25 @@
 #
 #
 import gc
-
 import requests
 from datetime import datetime
 import time
 
 pullTimer = 60  # seconds
-idPrinter1 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1B'  # Epson A
-idPrinter2 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1C'  # Epson B
-ip1 = '192.168.0.39'  # Dell PC IP
+# idPrinter1 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1B'  # Epson A
+# idPrinter2 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1C'  # Epson B
+idPrinter1 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1E' # Epson D
+idPrinter2 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1F' # Epson E
+# ip1 = '192.168.0.39'  # Master Dell PC IP
+ip1 = '192.168.0.90' # Secondary Dell PC IP
 # ip2 = '192.168.0.151'  # Alienware, currently not relevant
 pullStore1 = {}
 pullStore2 = {}  # If adding additional printers, add more of these variables.
-webhookURL = 'https://hook.us1.make.com/7c5fomyqgiuaodfakepg13ty3rxxikmz'
+webhookURL = 'webhookURL'
 urlPrinter1 = 'http://' + ip1 + ':12340/v1/jobs?idents.device=' + idPrinter1 + '&name=Autonest*&sort=idents.internal' \
-                                                                               ':desc&state=pending|finished'
+                                                                               ':desc&state=finished'
 urlPrinter2 = 'http://' + ip1 + ':12340/v1/jobs?idents.device=' + idPrinter2 + '&name=Autonest*&sort=idents.internal' \
-                                                                               ':desc&state=pending|finished'
+                                                                               ':desc&state=finished'
 loopCount = 0
 
 
@@ -34,78 +36,66 @@ def sendRequest(webhookR, i):
 
     print(str(datetime.now().strftime("%H:%M:%S")) + " - Sending data to webhook...")
     try:
-        postReq = requests.post(webhookURL, json=request, timeout=30)  # Makes the post request to the webhook.
+        postReq = requests.post(webhookURL, json=request, timeout=60)  # Makes the post request to the webhook.
+        postReq.raise_for_status()
     except Exception:
         error = True
 
-    try:
-        # If an error is returned, wait a bit before retrying.
-        if ((postReq.status_code != requests.codes.ok) and (i <= 5)) or error:
-            print(str(datetime.now().strftime("%H:%M:%S")) + " - " + str(postReq.status_code) + ": Attempt " + str(i) + ". Trying again in " + str(i * 15) + " seconds.\n")
-            time.sleep(i * 15)
-            print("Retrying...")
-            i = i + 1
-            sendRequest(webhookR, i)
-        elif ((postReq.status_code != requests.codes.ok) and (i > 5)) or error:
-            print(str(datetime.now().strftime("%H:%M:%S")) + " - " +
-                str(postReq.status_code) + ": Attempt " + str(
-                    i) + ". Check to see if the Caldera API is running.\nTrying again "
-                         "in 120 seconds.\n")
-            time.sleep(120)
-            print(str(datetime.now().strftime("%H:%M:%S")) + " - Retrying...")
-            i = i + 1
-            sendRequest(webhookR, i)
-        else:
-            print(str(postReq.status_code) + " Sent successfully.\n")
-    except AttributeError:
-        print(str(datetime.now().strftime("%H:%M:%S")) + " - AttributeError: Will try again " + str(6 - i) + " more times.") 
+    # If an error is returned, wait a bit before retrying.
+    if (i <= 5 and error):
+        print(str(datetime.now().strftime("%H:%M:%S")) + ": Attempt " + str(i) + ". Trying again in " + str(i * 15) + " seconds.\n")
         time.sleep(i * 15)
+        print("Retrying...")
         i = i + 1
-        if (i > 5):
-            i = 0
-            sendRequest(webhookR, i)
+        sendRequest(webhookR, i)
+    elif (i > 5 and error):
+        print(str(datetime.now().strftime("%H:%M:%S")) + ": Could not send data to webhook. :(\nExiting.\n")
+        time.sleep(5)
+        i = 1
+    else:
+        print(str(postReq.status_code) + " Sent successfully.\n")
 
 
-# Makes a get request to the provided URL. Bad requests will continue to retry until successful.
+
+# Makes a get request to the provided URL. Bad requests will exit after 5 retries.
 def getRequest(urlRequest, i):
     getReq = []
     error = False  # try/catch flag for get timeout.
-
+    print("Getting data.")
     try:
         getReq = requests.get(urlRequest)  # Makes the get request to the Caldera API.
+        getReq.raise_for_status()
     except Exception as e:
         error = True
 
-    try:
-        # If an error is returned, wait a bit before retrying.
-        if ((getReq.status_code != requests.codes.ok) and (i <= 5)) or error:
-            print(str(datetime.now().strftime("%H:%M:%S")) + " - " + str(getReq.status_code) + ": Fetch Attempt " + i + ". Trying again in " + i * 15 + " seconds.\n")
-            time.sleep(i * 15)
-            print("Retrying...")
-            i = i + 1
-            getReq = getRequest(urlRequest, i)
-        elif ((getReq.status_code != requests.codes.ok) and (i > 5)) or error:
-            print(str(datetime.now().strftime("%H:%M:%S")) + " - " + 
-                str(getReq.status_code) + ": Fetch Attempt " + i + ". Check to see if the Caldera API is running.\nTrying again "
-                                                            "in 120 seconds.\n")
-            time.sleep(120)
-            print(str(datetime.now().strftime("%H:%M:%S")) + " - " + "Retrying...")
-            i = i + 1
-            getReq = getRequest(urlRequest, i)
-    except AttributeError as e:
-        print(str(e) + " Caldera API is not running.")
-
-    return getReq
+    # If an error is returned, wait a bit before retrying.
+    if (i <= 5 and error):
+        print(str(datetime.now().strftime("%H:%M:%S")) + ": Fetch Attempt " + str(i) + ". Trying again in " + str(i * 5) + " seconds.\n")
+        time.sleep(i * 5)
+        print("Retrying...")
+        i = i + 1
+        getReq = getRequest(urlRequest, i)
+    elif (i > 5 and error):
+        print(str(datetime.now().strftime("%H:%M:%S")) + ": Fetching failed. Check to see if the Caldera API is running.\nExiting.\n")
+        time.sleep(5)
+        i = 1
+        return []
+    else:
+        return getReq
 
 
 # Pulls spooler data from Caldera server, checks it against the last pull and sends to Make is it is different.
 def pullPush(urlPrinter, lastPull):
     r = getRequest(urlPrinter, 1)
+    if (r == []) or (r is None):
+        return lastPull
     spoolerJson = r.json()
     if lastPull != spoolerJson:
         # print(spoolerJson)
         print("New data detected, sending to server.\n")
         sendRequest(spoolerJson, 1)
+    else:
+        print("No data change.")
     return spoolerJson
 
 
@@ -113,9 +103,11 @@ time.sleep(1)  # Gives a little time for the Caldera API to launch.
 gc.enable()
 # Loops endlessly, delayed by whatever pullTimer is set to. Add new lines here for new Printers
 while True:
-    pullStore2 = pullPush(urlPrinter2, pullStore2)  # Epson B
-    time.sleep(3)
-    pullStore1 = pullPush(urlPrinter1, pullStore1)  # Epson A
+    print(idPrinter2)
+    pullStore2 = pullPush(urlPrinter2, pullStore2) 
+    print(idPrinter1)
+    time.sleep(1)
+    pullStore1 = pullPush(urlPrinter1, pullStore1) 
     print(str(datetime.now().strftime("%H:%M:%S")) + " - Sleeping Loop")
     time.sleep(pullTimer)
     loopCount = loopCount + 1

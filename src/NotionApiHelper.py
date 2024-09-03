@@ -158,7 +158,7 @@ class NotionApiHelper:
                 return {}
 
 
-    def create_page(self, databaseID, properties):
+    def create_page(self, databaseID, properties): # Will update to allow icon and cover images later.
         """
         Sends a post request to a specified Notion database, creating a new page with the specified properties. Returns the response as a JSON object. Will return {} if the request fails.
 
@@ -171,7 +171,7 @@ class NotionApiHelper:
             Returns:
                 dict: The JSON response from the Notion API.
         """
-        jsonBody = {"parent": {"database_id": databaseID}, "properties": properties}
+        jsonBody = json.dumps({"parent": {"database_id": databaseID}, "properties": properties})
         try:
             response = requests.post(f"{self.endPoint}/pages", headers=self.headers, json=jsonBody)
             response.raise_for_status()
@@ -190,7 +190,31 @@ class NotionApiHelper:
                 return {}
             
 
-    def properties_to_json(self):
+    def update_page(self, pageID, properties, trash = False): # Will update to allow icon and cover images later.
+        '''
+        Sends a patch request to a specified Notion page, updating the page with the specified properties. Returns the response as a JSON object. Will return {} if the request
+        '''
+        jsonBody = json.dumps({"properties": properties})
+        try:
+            response = requests.post(f"{self.endPoint}/pages/{pageID}", headers=self.headers, json=jsonBody)
+            response.raise_for_status()
+            self.counter = 0
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            if self.counter < self.MAX_RETRIES:
+                logging.error(f"Network error occurred: {e}. Trying again in {self.RETRY_DELAY} seconds.")
+                time.sleep(self.RETRY_DELAY)
+                self.counter += 1
+                return self.create_page(pageID, properties)
+            else:    
+                logging.error(f"Network error occurred too many times: {e}")
+                time.sleep(3)
+                self.counter = 0
+                return {}
+
+
+    '''
+    def properties_to_json(self):   #SHELVED FOR THE TIME BEING
         """
         Opens a GUI window with select and text fields to input the properties of a new Notion page. Returns the properties as a JSON object formatted for the NotionAPI.
         https://developers.notion.com/reference/page-property-values
@@ -295,4 +319,163 @@ class NotionApiHelper:
         root.mainloop()
 
         return properties
+    '''
+
+    def simple_prop_gen(self, prop_name, prop_type, prop_value):
+        '''
+        Generates a simple property JSON object.
+        "checkbox" | "email" | "number" | "phone_number" | "url"
+        '''
+        return {prop_name: {prop_type: prop_value}}
     
+    def selstat_prop_gen(self, prop_name, prop_type, prop_value):
+        '''
+        Generates a select or status property JSON object.
+        '''
+        return {prop_name: {prop_type: {"name": prop_value}}}
+    
+    def date_prop_gen(self, prop_name, prop_type, prop_value, prop_value2):
+        '''
+        Generates a date property JSON object.
+        '''
+        if prop_value2 is None:
+            return {prop_name: {prop_type: {"start": prop_value}}}
+        else:
+            return {prop_name: {prop_type: {"start": prop_value, "end": prop_value2}}}
+        
+    def files_prop_gen(self, prop_name, prop_type, file_names, file_urls):
+        '''
+        Generates a files property JSON object.
+        '''
+        file_body = []
+        for name, url in zip(file_names, file_urls):
+            file_body.append({"name": name, "external": {"url": url}})
+        return {prop_name: {prop_type: file_body}}
+
+    def mulsel_prop_gen(self, prop_name, prop_type, prop_values):
+        '''
+        Generates a multi-select or relation property JSON object.
+        '''
+        prop_value_new = []
+        for value in prop_values:
+            prop_value_new.append({"name": value})
+        return {prop_name: {prop_type: prop_value_new}}
+
+    def relation_prop_gen(self, prop_name, prop_type, prop_values):
+        '''
+        Generates a relation property JSON object.
+        '''
+        prop_value_new = []
+        for value in prop_values:
+            prop_value_new.append({"id": value})
+        return {prop_name: {prop_type: prop_value_new}}
+    
+    def people_prop_gen(self, prop_name, prop_type, prop_value):
+        '''
+        Generates a people property JSON object.
+        '''
+        prop_value_new = []
+        for value in prop_value:
+            prop_value_new.append({"object": "user","id": value})
+        return {prop_name: {prop_type: prop_value_new}}
+    
+    def rich_text_prop_gen(self, prop_name, prop_type, prop_value, prop_value_link = None, annotation = None):
+        '''
+        Generates a rich text property JSON object.
+        '''
+        default_annotations = {"bold": False, "italic": False, "strikethrough": False, "underline": False, "code": False, "color": "default"}
+        rich_body = []
+        if annotation and prop_value_link:
+            for x, y, z in zip(prop_value, prop_value_link, annotation):
+                rich_body.append({"type": "text", "text": {"content": x, "link": y}, "annotations": {"bold": z["bold"], "italic": z["italic"], "strikethrough": z["strikethrough"], "underline": z["underline"], "code": z["code"], "color": z["color"]}, "plain_text": x, "href": y})
+        elif prop_value_link:
+            for x, y in zip(prop_value, prop_value_link):
+                rich_body.append({"type": "text", "text": {"content": x, "link": y}, "annotations": default_annotations, "plain_text": x, "href": y})
+        elif annotation:
+            for x, z in zip(prop_value, annotation):
+                rich_body.append({"type": "text", "text": {"content": x, "link": y}, "annotations": {"bold": z["bold"], "italic": z["italic"], "strikethrough": z["strikethrough"], "underline": z["underline"], "code": z["code"], "color": z["color"]}, "plain_text": x, "href": y})
+        else:
+            for x in prop_value:
+                rich_body.append({"type": "text", "text": {"content": x, "link": prop_value_link}, "annotations": default_annotations, "plain_text": x, "href": prop_value_link})
+        return {prop_name: {prop_type: rich_body}}
+    
+    def title_prop_gen(self, prop_name, prop_type, prop_value, prop_value_link = None, annotation = None):
+        '''
+        Generates a title property JSON object.
+        '''
+        default_annotations = {"bold": False, "italic": False, "strikethrough": False, "underline": False, "code": False, "color": "default"}
+        rich_body = []
+        if annotation and prop_value_link:
+            for x, y, z in zip(prop_value, prop_value_link, annotation):
+                rich_body.append({"type": "text", "text": {"content": x, "link": y}, "annotations": {"bold": z["bold"], "italic": z["italic"], "strikethrough": z["strikethrough"], "underline": z["underline"], "code": z["code"], "color": z["color"]}, "plain_text": x, "href": y})
+        elif prop_value_link:
+            for x, y in zip(prop_value, prop_value_link):
+                rich_body.append({"type": "text", "text": {"content": x, "link": y}, "annotations": default_annotations, "plain_text": x, "href": y})
+        elif annotation:
+            for x, z in zip(prop_value, annotation):
+                rich_body.append({"type": "text", "text": {"content": x, "link": y}, "annotations": {"bold": z["bold"], "italic": z["italic"], "strikethrough": z["strikethrough"], "underline": z["underline"], "code": z["code"], "color": z["color"]}, "plain_text": x, "href": y})
+        else:
+            for x in prop_value:
+                rich_body.append({"type": "text", "text": {"content": x, "link": prop_value_link}, "annotations": default_annotations, "plain_text": x, "href": prop_value_link})
+        return {prop_name: {"id": prop_type, "type": prop_type, prop_type: rich_body}}
+
+    def generate_property_body(self, prop_name, prop_type, prop_value, prop_value2 = None, annotation = None):
+        '''
+        Accepts a range of property types and generates a JSON object based on the input.
+            Accepted property types is a string from the following list:
+                "checkbox" | "email" | "number" | "phone_number" | "url" | "select" | "status" | "date" | "files" | "multi_select" | "relation" | "people" | "rich_text" | "title"
+            Args:
+                prop_name (string): The name of the property.
+                prop_type (string): The type of the property.
+                prop_value (string/number/bool/array of strings): The value of the property.
+                prop_value2 (string/array of strings): The second value of the property. Optional.
+                annotation (array of dict): The annotation of the property. Optional.
+                    Dictionary format: [{"bold": bool, "italic": bool, "strikethrough": bool, "underline": bool, "code": bool, "color": string}]
+                    default annotations: {"bold": False, "italic": False, "strikethrough": False, "underline": False, "code": False, "color": "default"}
+                    Acceptable Colors: Colors: "blue", "blue_background", "brown", "brown_background", "default", "gray", "gray_background", "green", "green_background", "orange", "orange_background", "pink", "pink_background", "purple", "purple_background", "red", "red_background", "yellow", "yellow_background"
+            Returns:
+                dict: The JSON object of the property, formatted to fit as one of the properties in a page POST/PATCH request.
+
+            Checkbox, Email, Number, Phone Number, URL:
+                Property Name: string as the name of the property field in Notion
+                Property Type: string as "checkbox" | "email" | "number" | "phone_number" | "url"
+                Property Value: string/number/bool to be uploaded.
+
+            Select, Status:
+                Property Name: string as the name of the property field in Notion
+                Property Type: string as "select" | "status"
+                Property Value: string to be uploaded. Will create a new select/status if it does not exist.
+
+            Date:
+                Property Name: string as the name of the property field in Notion
+                Property Type: string as "date"
+                Start Date Value: string (ISO 8601 date and optional time) as "2020-12-08T12:00:00Z" or "2020-12-08"
+                End Date Value: optional string (ISO 8601 date and optional time) as "2020-12-08T12:00:00Z" or "2020-12-08"
+                    End date will default to None if not provided, meaning the date is not a range.
+
+            Files:
+                Property Name: string as the name of the property field in Notion
+                Property Type: string as "files"
+                File Names: Array of string
+                File URLs: Array of string
+
+            Multi-Select:
+        '''
+        type_dict = {
+            'checkbox': self.simple_prop_gen(prop_name, prop_type, prop_value), # string, string, string
+            'email': self.simple_prop_gen(prop_name, prop_type, prop_value), # string, string, string
+            'number': self.simple_prop_gen(prop_name, prop_type, prop_value), # string, string, string
+            'phone_number': self.simple_prop_gen(prop_name, prop_type, prop_value), # string, string, string
+            'url': self.simple_prop_gen(prop_name, prop_type, prop_value), # string, string, string
+            'select': self.selstat_prop_gen(prop_name, prop_type, prop_value), # string, string, string
+            'status': self.selstat_prop_gen(prop_name, prop_type, prop_value), # string, string, string
+            'date': self.date_prop_gen(prop_name, prop_type, prop_value, prop_value2), # string, string, string, string
+            'files': self.files_prop_gen(prop_name, prop_type, prop_value, prop_value2), # string, string, array of string, array of string
+            'multi_select': self.mulsel_prop_gen(prop_name, prop_type, prop_value), # string, string, array of strings
+            'relation': self.relation_prop_gen(prop_name, prop_type, prop_value), # string, string, array of strings
+            'people': self.people_prop_gen(prop_name, prop_type, prop_value), # string, string, array of strings
+            'rich_text': self.rich_text_prop_gen(prop_name, prop_type, prop_value, prop_value2, annotation), # string, string, array of strings, array of strings, array of objects
+            'title': self.title_prop_gen(prop_name, prop_type, prop_value, prop_value2, annotation) # string, string, array of strings, array of strings, array of objects
+        }
+        return json.dumps(type_dict[prop_type])
+
