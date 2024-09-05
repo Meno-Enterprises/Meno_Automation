@@ -51,7 +51,7 @@ class NotionApiHelper:
                     If not specified, all pages will be retrieved.
 
             Returns:
-                dict: The JSON response from the Notion API.
+                dict: The "results" of the JSON response from the Notion API. This will cut out the pagination information, returning only the page data.
 
         Additional information on content filters can be found at https://developers.notion.com/reference/post-database-query-filter#the-filter-object
         Additional information on Notion queries can be found at https://developers.notion.com/reference/post-database-query
@@ -68,17 +68,19 @@ class NotionApiHelper:
             return {}
 
         results = databaseJson["results"]
-
+        print("Data returned.")
         while databaseJson["has_more"] and get_all:
+            print("More data available.")
             time.sleep(0.5) # To avoid rate limiting
-            bodyJson = {"page_size": page_size, "start_cursor": databaseJson["next_cursor"]}  
+            print("Querying next page...")
+            bodyJson = {"page_size": page_size, "start_cursor": databaseJson["next_cursor"], "filter": content_filter} if content_filter else {"page_size": page_size, "start_cursor": databaseJson["next_cursor"]}
             new_data = self._make_query_request(databaseID, filter_properties, bodyJson)
             if not new_data:
                 self.counter = 0
                 return {}
             databaseJson = new_data
             results.extend(databaseJson["results"])
-
+        print("All data retrieved, returning results.")
         self.counter = 0
         return results
 
@@ -95,16 +97,20 @@ class NotionApiHelper:
             dict: The JSON response from the Notion API.
         """
         try:
+            print("Sending post request...")
             response = requests.post(f"{self.endPoint}/databases/{databaseID}/query{filter_properties}", headers=self.headers, json=bodyJson)
             response.raise_for_status()
+            print("Post request successful.")
             return response.json()
         except requests.exceptions.RequestException as e:
             if self.counter < self.MAX_RETRIES:
+                print(f"Network error occurred: {e}. Trying again in {self.RETRY_DELAY} seconds.")
                 logging.error(f"Network error occurred: {e}. Trying again in {self.RETRY_DELAY} seconds.")
                 time.sleep(self.RETRY_DELAY)
                 self.counter += 1
                 return self._make_query_request(databaseID, filter_properties, bodyJson)
             else:
+                print(f"Network error occurred too many times: {e}")
                 logging.error(f"Network error occurred too many times: {e}")
                 time.sleep(3)
                 return {}
@@ -476,6 +482,39 @@ class NotionApiHelper:
                 File URLs: Array of string
 
             Multi-Select:
+                Property Name: string as the name of the property field in Notion
+                Property Type: string as "multi_select"
+                Property Value: Array of strings
+
+            Relation:
+                Property Name: string as the name of the property field in Notion
+                Property Type: string as "relation"
+                Property Value: Array of strings
+
+            People:
+                Property Name: string as the name of the property field in Notion
+                Property Type: string as "people"
+                Property Value: Array of strings
+
+            Rich Text:
+                Property Name: string as the name of the property field in Notion
+                Property Type: string as "rich_text"
+                Property Value: Array of strings
+                Property Value Link: Array of strings
+                Annotation: Array of dictionaries
+                    Dictionary format: [{"bold": bool, "italic": bool, "strikethrough": bool, "underline": bool, "code": bool, "color": string}]
+                    default annotations: {"bold": False, "italic": False, "strikethrough": False, "underline": False, "code": False, "color": "default"}
+                    Acceptable Colors: Colors: "blue", "blue_background", "brown", "brown_background", "default", "gray", "gray_background", "green", "green_background", "orange", "orange_background", "pink", "pink_background", "purple", "purple_background", "red", "red_background", "yellow", "yellow_background"
+        
+            Title:
+                Property Name: string as the name of the property field in Notion
+                Property Type: string as "title"
+                Property Value: Array of strings
+                Property Value Link: Array of strings
+                Annotation: Array of dictionaries
+                    Dictionary format: [{"bold": bool, "italic": bool, "strikethrough": bool, "underline": bool, "code": bool, "color": string}]
+                    default annotations: {"bold": False, "italic": False, "strikethrough": False, "underline": False, "code": False, "color": "default"}
+                    Acceptable Colors: Colors: "blue", "blue_background", "brown", "brown_background", "default", "gray", "gray_background", "green", "green_background", "orange", "orange_background", "pink", "pink_background", "purple", "purple_background", "red", "red_background", "yellow", "yellow_background"
         '''
         type_dict = {
             'checkbox': self.simple_prop_gen(prop_name, prop_type, prop_value), # string, string, string
