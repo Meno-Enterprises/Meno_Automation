@@ -1,14 +1,15 @@
 from NotionApiHelper import NotionApiHelper
+from AutomatedEmails import AutomatedEmails
 from datetime import datetime, timezone
 import csv, os
 
 print("Starting Daily Report...")
 notion_helper = NotionApiHelper()
 csv_directory = "DailyReportOutput"
-csv_file_name = os.path.join(csv_directory, f"MOD Daily Report_{datetime.now().strftime('%Y-%m-%d')}.csv")
+csv_file_name = os.path.join(csv_directory, f"MOD_Daily_Report_{datetime.now().strftime('%Y-%m-%d')}.csv")
 os.makedirs(csv_directory, exist_ok=True)
 content_filter = {"and": [{"property": "Job status", "select": {"does_not_equal": "Canceled"}}, {"property": "Created", "date": {"past_week": {}}}]}
-current_datetime = datetime.now(timezone.utc)
+today = datetime.now(timezone.utc)
 customer_dict = {}
 product_dict = {}
 job_id = []
@@ -21,65 +22,75 @@ notion_response = notion_helper.query("f11c954da24143acb6e2bf0254b64079", [r"%7C
 
 print("Processing Notion API response...")
 for page in notion_response:
-    customer = page["properties"]["Customer"]["formula"]["string"]
     jid = page["properties"]["ID"]["unique_id"]["number"]
-    job_status = page["properties"]["Job status"]["select"]["name"]
-    
+    try:    # Jobs are supposed to have each of these properties, so this wlil filter out any jobs that are missing properties. This typically means the job was created, but not accepted in the system for various reasons.
+        customer = page["properties"]["Customer"]["formula"]["string"]
+        job_status = page["properties"]["Job status"]["select"]["name"]
 
-    if customer and jid not in job_id:
-        job_id.append(jid)
-        status_count_dict[job_status] += 1
-        if job_status != "Canceled":
-            product_description = page["properties"]["Product Description"]["formula"]["string"]
-            created = datetime.fromisoformat(page["created_time"].replace('Z', '+00:00'))
-            last_edited = datetime.fromisoformat(page["last_edited_time"].replace('Z', '+00:00'))
-            reprint_count = page["properties"]["Reprint count"]["formula"]["number"]
-            product_quantity = page["properties"]["Quantity"]["number"]
-            product_id = page["properties"]["Product ID"]["formula"]["string"]   
-            job_age = (current_datetime - created).days
-            age_label = f"Day {job_age}" if job_age < 6 else "Day 6+"
-            shipped_today = True if (job_status == "Complete") and ((current_datetime - last_edited).days == 0) else False
+        if customer and jid not in job_id:
+            job_id.append(jid)
+            status_count_dict[job_status] += 1
+            if job_status != "Canceled":
+                product_description = page["properties"]["Product Description"]["formula"]["string"]
+                created = datetime.fromisoformat(page["created_time"].replace('Z', '+00:00'))
+                last_edited = datetime.fromisoformat(page["last_edited_time"].replace('Z', '+00:00'))
+                reprint_count = page["properties"]["Reprint count"]["formula"]["number"]
+                product_quantity = page["properties"]["Quantity"]["number"]
+                product_id = page["properties"]["Product ID"]["formula"]["string"]
 
-            if customer not in customer_dict:
-                print(f"New customer found: {customer}")
-                customer_dict[customer] = {
-                    "Total Jobs": 0,
-                    "Day 0": 0,
-                    "Day 1": 0,
-                    "Day 2": 0,
-                    "Day 3": 0,
-                    "Day 4": 0,
-                    "Day 5": 0,
-                    "Day 6+": 0,
-                    "Shipped Today": 0
-                }
+                # Calculate job_age excluding weekends
+                job_age = 0
+                created_date = created
+                while created_date < today:
+                    if created_date.weekday() < 5:  # Monday to Friday are counted
+                        job_age += 1
+                    created_date += timedelta(days=1)
 
-            if product_id not in product_dict:
-                print(f"New product found: {product_id}")
-                product_dict[product_id] = {
-                    # "Total Jobs": 0,
-                    "Total Items": 0,
-                    "Day 0": 0,
-                    "Day 1": 0,
-                    "Day 2": 0,
-                    "Day 3": 0,
-                    "Day 4": 0,
-                    "Day 5": 0,
-                    "Day 6+": 0,
-                    "Total Reprints": 0
-                }   
-            if shipped_today:
-                customer_dict[customer]["Shipped Today"] += 1
-            
-            if job_status != "Complete":
-                total_jobs += 1
-                total_items += product_quantity
-                customer_dict[customer]["Total Jobs"] += 1
-                customer_dict[customer][age_label] += 1
-                # product_dict[product_id]["Total Jobs"] += 1
-                product_dict[product_id]["Total Items"] += product_quantity
-                product_dict[product_id][age_label] += 1
-                product_dict[product_id]["Total Reprints"] += reprint_count
+                age_label = f"Day {job_age}" if job_age < 6 else "Day 6+"
+                shipped_today = True if (job_status == "Complete") and ((today - last_edited).days == 0) else False
+
+                if customer not in customer_dict:
+                    print(f"New customer found: {customer}")
+                    customer_dict[customer] = {
+                        "Total Jobs": 0,
+                        "Day 0": 0,
+                        "Day 1": 0,
+                        "Day 2": 0,
+                        "Day 3": 0,
+                        "Day 4": 0,
+                        "Day 5": 0,
+                        "Day 6+": 0,
+                        "Shipped Today": 0
+                    }
+
+                if product_id not in product_dict:
+                    print(f"New product found: {product_id}")
+                    product_dict[product_id] = {
+                        # "Total Jobs": 0,
+                        "Total Items": 0,
+                        "Day 0": 0,
+                        "Day 1": 0,
+                        "Day 2": 0,
+                        "Day 3": 0,
+                        "Day 4": 0,
+                        "Day 5": 0,
+                        "Day 6+": 0,
+                        "Total Reprints": 0
+                    }   
+                if shipped_today:
+                    customer_dict[customer]["Shipped Today"] += 1
+
+                if job_status != "Complete":
+                    total_jobs += 1
+                    total_items += product_quantity
+                    customer_dict[customer]["Total Jobs"] += 1
+                    customer_dict[customer][age_label] += 1
+                    # product_dict[product_id]["Total Jobs"] += 1
+                    product_dict[product_id]["Total Items"] += product_quantity
+                    product_dict[product_id][age_label] += 1
+                    product_dict[product_id]["Total Reprints"] += reprint_count
+    except Exception as e:
+        print(f"Error processing job {jid}: {e}")
 
 print(f"Processing finished.\nWriting to CSV {csv_file_name}...")
 with open(csv_file_name, mode='w', newline='') as csv_file:
@@ -100,4 +111,13 @@ with open(csv_file_name, mode='w', newline='') as csv_file:
     csv_writer.writerow(["Job Status", "Jobs Count"])
     for status, count in status_count_dict.items():
         csv_writer.writerow([status, count])
-print("CSV written successfully in as ", csv_file_name)
+print("CSV written successfully as ", csv_file_name)
+
+print("Preparing to send email...")
+automated_emails = AutomatedEmails()
+email_config_path = "conf/MOD_DailyReport_Email_Conf.json"
+attachment_path = [csv_file_name]
+subject = f"MOD Daily Report {datetime.now().strftime('%m-%d-%Y')}"
+body = "Please find the attached daily report for Meno On-Demand.\n\n\nThis is an automated email being sent on behalf of Aria Corona, please do not reply. If you have any questions or concerns, please contact Aria directly at acorona@menoenterprises.com."
+automated_emails.send_email(email_config_path, subject, body, attachment_path)
+print("End of script.")
