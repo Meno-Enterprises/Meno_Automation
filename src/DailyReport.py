@@ -1,6 +1,6 @@
 from NotionApiHelper import NotionApiHelper
 from AutomatedEmails import AutomatedEmails
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import csv, os
 
 print("Starting Daily Report...")
@@ -41,7 +41,7 @@ for page in notion_response:
                 # Calculate job_age excluding weekends
                 job_age = 0
                 created_date = created
-                while created_date < today:
+                while (today-created_date).days > 0:
                     if created_date.weekday() < 5:  # Monday to Friday are counted
                         job_age += 1
                     created_date += timedelta(days=1)

@@ -38,7 +38,8 @@ def sendRequest(webhookR, i):
     try:
         postReq = requests.post(webhookURL, json=request, timeout=60)  # Makes the post request to the webhook.
         postReq.raise_for_status()
-    except Exception:
+    except Exception as e:
+        print(e)
         error = True
 
     # If an error is returned, wait a bit before retrying.

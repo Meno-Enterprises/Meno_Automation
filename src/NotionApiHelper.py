@@ -1,6 +1,4 @@
 import requests, time, json, logging
-import tkinter as tk
-from tkinter import messagebox
 
 
 class NotionApiHelper:
@@ -98,6 +96,7 @@ class NotionApiHelper:
         """
         try:
             print("Sending post request...")
+            print(f"{self.endPoint}/databases/{databaseID}/query{filter_properties}")
             response = requests.post(f"{self.endPoint}/databases/{databaseID}/query{filter_properties}", headers=self.headers, json=bodyJson)
             response.raise_for_status()
             print("Post request successful.")
@@ -130,6 +129,7 @@ class NotionApiHelper:
         """
         try:
             time.sleep(0.5) # To avoid rate limiting
+            print(f"{self.endPoint}/pages/{pageID}")
             response = requests.get(f"{self.endPoint}/pages/{pageID}", headers=self.headers)
             response.raise_for_status()
             self.counter = 0
@@ -163,6 +163,7 @@ class NotionApiHelper:
         """
         try:
             time.sleep(0.5) # To avoid rate limiting
+            print(f"{self.endPoint}/pages/{pageID}/properies/{propID}")
             response = requests.get(f"{self.endPoint}/pages/{pageID}/properies/{propID}", headers=self.headers)
             response.raise_for_status()
             self.counter = 0
@@ -195,6 +196,7 @@ class NotionApiHelper:
         """
         jsonBody = json.dumps({"parent": {"database_id": databaseID}, "properties": properties})
         try:
+            print(f"{self.endPoint}/pages")
             response = requests.post(f"{self.endPoint}/pages", headers=self.headers, json=jsonBody)
             response.raise_for_status()
             self.counter = 0
