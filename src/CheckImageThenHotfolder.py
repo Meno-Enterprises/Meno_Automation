@@ -1,14 +1,40 @@
-import time, os, re, requests
+import time, os, re, shutil
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 from NotionApiHelper import NotionApiHelper
+from AutomatedEmails import AutomatedEmails
 from pathlib import Path
 from PIL import Image
 import json
 
+# @Aria move common variables to init for easier configuration.
+
+'''
+Image correction logic:
+    1. Check if file is an image.
+    2. Check if database ID is present in file name.
+    3. Check if file is a reprint. If so, send it straight to a hotfolder.
+    4. Get job information from Notion.
+    5. Get product information from Notion.
+    6. Get image size and DPI.
+
+    7. Preflight checks:
+        1. Determine rotation based off which aspect ratio is closer to target aspect ratio.
+        2. Check if image aspect ratio is within 5% of target aspect ratio. If not, trash the file and report the error.
+        3. Check if image size matches target size within 38 pixels (1/4 inch) at 150 DPI.
+            a. If image size matches target size, but DPI is wrong, change DPI EXIF Data and move to hotfolder.
+            b. If image size and DPI matches target size and DPI, move to hotfolder.
+        4. If image size does not match target size:
+            a. If customer is on approved preflight list, scale image, crop to correct aspect ratio and move to hotfolder.
+            b. If customer is not on approved preflight list, report error and trash file.
+'''
+
 class HotfolderHandler(FileSystemEventHandler):
     def __init__(self):
         self.notion_helper = NotionApiHelper()
+        self.automated_emails = AutomatedEmails()
+        self.email_config_path = r"conf/MOD_Preflight_Error_Conf.json"
+        self.hotfolder_path = "//192.168.0.178/meno/Hotfolders"
         path = Path(r'conf/CustomerPreflightApproval.json')
         with open(path, 'r') as file:
             self.customer_preflight_approval = json.load(file)
@@ -24,26 +50,26 @@ class HotfolderHandler(FileSystemEventHandler):
     def get_image_info(self, image_path):
         print(f"Getting image info for {image_path}.")
         image = Image.open(image_path)
-        image.show()
         size = image.size
         dpi = image.info.get('dpi')
         return size, dpi
-
+    
     def adjust_dpi_and_move(self, image, hotfolder, file_name):
         print(f"Adjusting DPI to 150 and moving to {hotfolder}.")
-        new_path = f"//192.168.0.178/meno/Hotfolders/{hotfolder}/{file_name}"
+        new_path = f"{self.hotfolder_path}/{hotfolder}/{file_name}"
         if os.path.exists(new_path):
             print(f"File {file_name} already exists in {hotfolder}. Removing old file.")
             self.remove_file(new_path)
             time.sleep(5) # Wait for Caldera to recognize the file is gone.        
         image.save(new_path, dpi=(150, 150)) # Force saves the image to 150 DPI. Doesn't actually do anything to the image, just changes the EXIF data
+        shutil.copy(new_path, f"{self.hotfolder_path}/tmp/{file_name}")
         pass
     
     def resize_and_move(self, image, hotfolder, file_name, target_xpix, target_ypix, original_size, job_id):
         try:
             image.show()
             print(f"Resizing image to {target_xpix},{target_ypix} and moving to {hotfolder}.")
-            new_path = f"//192.168.0.178/meno/Hotfolders/{hotfolder}/{file_name}"
+            new_path = f"{self.hotfolder_path}/{hotfolder}/{file_name}"
             scale_factor_width = target_xpix / original_size[0]
             scale_factor_height = target_ypix / original_size[1]
             scale_factor = max(scale_factor_width, scale_factor_height)
@@ -69,7 +95,8 @@ class HotfolderHandler(FileSystemEventHandler):
                     scaled_image.save(new_path, dpi=(150, 150), icc_profile=icc_profile)
                 else:
                     scaled_image.save(new_path, dpi=(150, 150))
-                scaled_image.show()
+                time.sleep(1)
+                shutil.copy(new_path, f"{self.hotfolder_path}/tmp/{file_name}")
                 return None
             # Crop the image and save it to the hotfolder.
             print(f"Cropping image to {target_xpix},{target_ypix}.")
@@ -79,15 +106,17 @@ class HotfolderHandler(FileSystemEventHandler):
             else:
                 cropped_image.save(new_path, dpi=(150, 150))
             print(f"Corrected image to {target_xpix},{target_ypix} and moved to {hotfolder}.")
+            time.sleep(1)
+            shutil.copy(new_path, f"{self.hotfolder_path}/tmp/{file_name}")
         except Exception as e:
             print(f"Error resizing image: {e}")
-            self.report_error(job_id, f"Error resizing image: {e}\nFind Aria and let her know this broke.")
+            self.report_error(job_id, f"Error resizing image: {e}\nFind Aria and let her know this broke.", 3)
         pass
 
     def move_to_hotfolder(self, hotfolder, file_name):
         print(f"Moving file {file_name} to {hotfolder}.")
-        new_path = f"//192.168.0.178/meno/Hotfolders/{hotfolder}/{file_name}"
-        current_path = f"//192.168.0.178/meno/Hotfolders/Hopper/{file_name}"
+        new_path = f"{self.hotfolder_path}/{hotfolder}/{file_name}"
+        current_path = f"{self.hotfolder_path}/Hopper/{file_name}"
         if os.path.exists(new_path):
             print(f"File {file_name} already exists in {hotfolder}. Removing old file.")
             self.remove_file(new_path)
@@ -95,7 +124,24 @@ class HotfolderHandler(FileSystemEventHandler):
         os.rename(current_path, new_path)
         pass
 
-    def report_error(self, job_id, error_message):
+    def report_error(self, job_id, error_message, level = 0, identifier = ""): # level 0: update note only, level 1: DPI Change, lvevl 2: Resize, level 3: stop job
+        properties = {}
+        subject = f"MOD Preflight Error: {job_id}, level {level}"
+        body = f"An error has occurred during preflight for job {job_id}.\n\nError message: {error_message}\n\nThis is an automated email being sent on behalf of Aria Corona, please do not reply. If you have any questions or concerns, please contact Aria directly at"
+        notes = self.notion_helper.generate_property_body("Notes", "rich_text", [error_message])
+        if level == 1:
+            tags = self.notion_helper.generate_property_body("Tags", "multi_select", ["DPI Changed"])
+        elif level == 2:
+            tags = self.notion_helper.generate_property_body("Tags", "multi_select", ["Resized"])
+            self.automated_emails.send_email(self.email_config_path, subject, body)
+        if level == 3:
+            system_status = self.notion_helper.generate_property_body("System status", "select", "Error")
+            properties = {"Notes": notes["Notes"], "System status": system_status["System status"]}
+            self.automated_emails.send_email(self.email_config_path, subject, body)            
+        else:
+            properties = {"Notes": notes["Notes"], "Tags": tags["Tags"]}
+        print(f"Reporting error for job {job_id}: {error_message}\n{properties}")
+        self.notion_helper.update_page(job_id, properties)
         pass
 
     def remove_file(self, file_path):
@@ -108,10 +154,13 @@ class HotfolderHandler(FileSystemEventHandler):
         pass
 
     def process_new_file(self, file_path):
-        if ".~#~" in file_path:  # Ignore temporary files.
-            print(f"File {file_path} is a temporary file. Skipping.")
-            time.sleep(1)
-            return None
+        if ".~#~" in file_path:  
+            print(f"File {file_path} is a temporary file. Waiting.")
+            file_path = file_path.replace(".~#~", "")
+            time.sleep(15)
+            if os.path.exists(file_path) == False:
+                print(f"File took too long to copy, skipping.")
+                return None
         time.sleep(5) # Wait for file to finish copying
         allow_alter = 0
         print(f"Processing file: {file_path}")
@@ -154,10 +203,9 @@ class HotfolderHandler(FileSystemEventHandler):
                 hotfolder = reprint_output['properties']['Hot folder path']['formula']['string']
             except Exception as e:
                 print(f"Missing info for reprint {job_id} in Notion. Skipping.")
-                self.report_error(job_id, f"Missing reprint info in Notion: {e}")
+                self.report_error(job_id, f"Missing reprint info in Notion: {e}", 3)
                 return None
             self.move_to_hotfolder(hotfolder, file_name)
-            self.remove_file(file_path) # Remove original file
             return None
         
         # Get job information from Notion
@@ -169,7 +217,7 @@ class HotfolderHandler(FileSystemEventHandler):
             customer = job_output['properties']['Customer']['formula']['string']
         except Exception as e: 
             print(f"Could not find product ID in job {job_id}. Skipping.")
-            self.report_error(job_id, f"Missing product or customer in Notion: {e}")
+            self.report_error(job_id, f"Missing product or customer in Notion: {e}", 3)
             self.remove_file(file_path)
             return None
 
@@ -177,7 +225,7 @@ class HotfolderHandler(FileSystemEventHandler):
             allow_alter = self.customer_preflight_approval[customer]
         except KeyError:
             print(f"Customer {customer} not found in preflight approval list. Skipping.")
-            self.report_error(job_id, f"Customer not found in preflight approval list.")
+            self.report_error(job_id, f"Customer not found in preflight approval list.", 3)
             self.remove_file(file_path)
             return None
 
@@ -189,13 +237,13 @@ class HotfolderHandler(FileSystemEventHandler):
             hotfolder = product_output['properties']['Hot Folder']['select']['name']
         except Exception as e:
             print(f"Missing info for {product_id} in Notion. Skipping. {e}")
-            self.report_error(job_id, f"Missing product info in Notion: {e}")
+            self.report_error(job_id, f"Missing product info in Notion: {e}", 3)
             self.remove_file(file_path)
             return None
         
         if xpix == None or ypix == None or hotfolder == None: 
             print(f"Missing product info for {product_id} in Notion. Skipping.")
-            self.report_error(job_id, "Missing product info in Notion.")
+            self.report_error(job_id, "Missing product info in Notion.", 3)
             self.remove_file(file_path)
             return None
 
@@ -212,8 +260,8 @@ class HotfolderHandler(FileSystemEventHandler):
 
         # Check if image aspect ratio is within 5% of target aspect ratio. If not, trash the file and report the error.
         if image_aspect <= target_aspect * 0.95 or image_aspect >= target_aspect * 1.05: 
-            print(f"Image aspect ratio does not match target aspect ratio. Trashing file.")
-            self.report_error(job_id, "Image aspect ratio does not match target aspect ratio.")
+            print(f"Image aspect ratio is outsize acceptable fixable range. Reporting and trashing file.")
+            self.report_error(job_id, "Image aspect ratio is outside acceptable fixable range.", 3)
             self.remove_file(file_path)
             return None
         
@@ -224,36 +272,39 @@ class HotfolderHandler(FileSystemEventHandler):
                 print(f"Image size matches target size, but DPI does not. Adjusting DPI to 150 and moving to {hotfolder}.")
                 image = Image.open(file_path)
                 self.adjust_dpi_and_move(image, hotfolder, file_name)
-                self.report_error(job_id, f"Image DPI {dpi} does not match target DPI. Adjusting to 150 DPI and moving to hotfolder.")
+                self.report_error(job_id, f"Image DPI {dpi} does not match target DPI. Adjusting to 150 DPI and moving to hotfolder.", 1)
                 self.remove_file(file_path) # Remove original file
                 return None
             else: # Image is correct size and DPI
                 print(f"Image size and DPI match target size. Moving to {hotfolder}.")
                 self.move_to_hotfolder(hotfolder, file_name)
-                self.remove_file(file_path) # Remove original file
                 return None
         elif(allow_alter == 1): # Image size does not match target size. Resize and move to hotfolder.
             print(f"Image size does not match target size. Resizing and moving to {hotfolder}.")
             image = Image.open(file_path)
             self.resize_and_move(image, hotfolder, file_name, xpix, ypix, size, job_id)
-            self.report_error(job_id, f"Image size {size} does not match target size ({xpix},{ypix}). Resizing.")
+            self.report_error(job_id, f"Image size {size} does not match target size ({xpix},{ypix}). Customer is on approved preflight list, resizing.", 2)
             self.remove_file(file_path) # Remove original file
             return None
         else: # Image size does not match target size at 150DPI. Report error and trash file.
             print(f"Image size does not match target size. Trashing file.")
-            self.report_error(job_id, "Image size does not match target size at 150DPI. Not sent to hotfolder.")
+            self.report_error(job_id, "Image size does not match target size at 150DPI. Customer not on approved preflight list. Not sent to hotfolder.", 3)
             self.remove_file(file_path)
             return None
         
 
 if __name__ == "__main__":
+    auto_emails = AutomatedEmails()
     path = r"\\192.168.0.178\meno\Hotfolders\Hopper"  # Replace with the path to your hotfolder
     event_handler = HotfolderHandler()
     observer = Observer()
     observer.schedule(event_handler, path, recursive=False)
     observer.start()
     print(f"Monitoring directory: {path}")
-
+    email_config_path = "conf/MOD_Preflight_Launch_Conf.json"
+    subject = "MOD Preflight Script Launch"
+    body = f"MOD Preflight Script has been started at {time.strftime('%Y-%m-%d %H:%M:%S')}.\n\n\nThis is an automated email being sent on behalf of Aria Corona, please do not reply. If you have any questions or concerns, please contact Aria directly at acorona@menoenterprises.com"
+    auto_emails.send_email(email_config_path, subject, body)
     try:
         while True:
             time.sleep(1)
