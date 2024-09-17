@@ -7,9 +7,13 @@ from pathlib import Path
 from PIL import Image
 import json
 
-# @Aria move common variables to init for easier configuration.
-
 '''
+Dependencies:
+    pip install pillow
+    pip install watchdog
+    NotionApiHelper.py
+    AutomatedEmails.py
+
 Image correction logic:
     1. Check if file is an image.
     2. Check if database ID is present in file name.
@@ -35,6 +39,10 @@ class HotfolderHandler(FileSystemEventHandler):
         self.automated_emails = AutomatedEmails()
         self.email_config_path = r"conf/MOD_Preflight_Error_Conf.json"
         self.hotfolder_path = "//192.168.0.178/meno/Hotfolders"
+        self.image_pattern = r"(.+)\.(jpg|jpeg|png)$"
+        self.db_pattern = r".*_(.*)__\d*"
+        self.reprint_pattern = r".*--(REP)-\d*_.*"
+        self.accepted_extensions = ['jpg', 'jpeg', 'png']
         path = Path(r'conf/CustomerPreflightApproval.json')
         with open(path, 'r') as file:
             self.customer_preflight_approval = json.load(file)
@@ -62,12 +70,14 @@ class HotfolderHandler(FileSystemEventHandler):
             self.remove_file(new_path)
             time.sleep(5) # Wait for Caldera to recognize the file is gone.        
         image.save(new_path, dpi=(150, 150)) # Force saves the image to 150 DPI. Doesn't actually do anything to the image, just changes the EXIF data
-        shutil.copy(new_path, f"{self.hotfolder_path}/tmp/{file_name}")
+        try:
+            shutil.copy(new_path, f"{self.hotfolder_path}/tmp/{file_name}")
+        except Exception as e:
+            print(f"Error copying file to tmp folder: {e}")
         pass
     
     def resize_and_move(self, image, hotfolder, file_name, target_xpix, target_ypix, original_size, job_id):
         try:
-            image.show()
             print(f"Resizing image to {target_xpix},{target_ypix} and moving to {hotfolder}.")
             new_path = f"{self.hotfolder_path}/{hotfolder}/{file_name}"
             scale_factor_width = target_xpix / original_size[0]
@@ -96,7 +106,10 @@ class HotfolderHandler(FileSystemEventHandler):
                 else:
                     scaled_image.save(new_path, dpi=(150, 150))
                 time.sleep(1)
-                shutil.copy(new_path, f"{self.hotfolder_path}/tmp/{file_name}")
+                try:
+                    shutil.copy(new_path, f"{self.hotfolder_path}/tmp/{file_name}")
+                except Exception as e:
+                    print(f"Error copying file to tmp folder: {e}")
                 return None
             # Crop the image and save it to the hotfolder.
             print(f"Cropping image to {target_xpix},{target_ypix}.")
@@ -107,7 +120,10 @@ class HotfolderHandler(FileSystemEventHandler):
                 cropped_image.save(new_path, dpi=(150, 150))
             print(f"Corrected image to {target_xpix},{target_ypix} and moved to {hotfolder}.")
             time.sleep(1)
-            shutil.copy(new_path, f"{self.hotfolder_path}/tmp/{file_name}")
+            try:
+                shutil.copy(new_path, f"{self.hotfolder_path}/tmp/{file_name}")
+            except Exception as e:
+                print(f"Error copying file to tmp folder: {e}")
         except Exception as e:
             print(f"Error resizing image: {e}")
             self.report_error(job_id, f"Error resizing image: {e}\nFind Aria and let her know this broke.", 3)
@@ -124,20 +140,20 @@ class HotfolderHandler(FileSystemEventHandler):
         os.rename(current_path, new_path)
         pass
 
-    def report_error(self, job_id, error_message, level = 0, identifier = ""): # level 0: update note only, level 1: DPI Change, lvevl 2: Resize, level 3: stop job
+    def report_error(self, job_id, error_message, level = 0): # level 0: update note only, level 1: DPI Change, lvevl 2: Resize, level 3: stop job
         properties = {}
         subject = f"MOD Preflight Error: {job_id}, level {level}"
-        body = f"An error has occurred during preflight for job {job_id}.\n\nError message: {error_message}\n\nThis is an automated email being sent on behalf of Aria Corona, please do not reply. If you have any questions or concerns, please contact Aria directly at"
+        body = f"An error has occurred during preflight for https://notion.so/{job_id}.\n\nError message: {error_message}\n\nThis is an automated email being sent on behalf of Aria Corona, please do not reply. If you have any questions or concerns, please contact Aria directly at"
         notes = self.notion_helper.generate_property_body("Notes", "rich_text", [error_message])
         if level == 1:
             tags = self.notion_helper.generate_property_body("Tags", "multi_select", ["DPI Changed"])
         elif level == 2:
             tags = self.notion_helper.generate_property_body("Tags", "multi_select", ["Resized"])
-            self.automated_emails.send_email(self.email_config_path, subject, body)
+            #self.automated_emails.send_email(self.email_config_path, subject, body)
         if level == 3:
             system_status = self.notion_helper.generate_property_body("System status", "select", "Error")
             properties = {"Notes": notes["Notes"], "System status": system_status["System status"]}
-            self.automated_emails.send_email(self.email_config_path, subject, body)            
+            #self.automated_emails.send_email(self.email_config_path, subject, body)            
         else:
             properties = {"Notes": notes["Notes"], "Tags": tags["Tags"]}
         print(f"Reporting error for job {job_id}: {error_message}\n{properties}")
@@ -165,20 +181,15 @@ class HotfolderHandler(FileSystemEventHandler):
         allow_alter = 0
         print(f"Processing file: {file_path}")
         file_name = os.path.basename(file_path)
-        accepted_extensions = ['jpg', 'jpeg', 'png']
-        image_pattern = r"(.+)\.(jpg|jpeg|png)$"
-        db_pattern = r".*_(.*)__\d*"
-        reprint_pattern = r".*--(REP)-\d*_.*"
 
         try:
-            # Regex Match Variables
-            job_id = re.search(db_pattern, file_name, re.IGNORECASE).group(1)
+            job_id = re.search(self.db_pattern, file_name, re.IGNORECASE).group(1)
             print(f"Job ID: {job_id}")
-            extension = re.search(image_pattern, file_name, re.IGNORECASE).group(2)
+            extension = re.search(self.image_pattern, file_name, re.IGNORECASE).group(2)
             print(f"Extension: {extension}")
 
             # Check if file is an image
-            if extension is None or extension.lower() not in accepted_extensions: 
+            if extension is None or extension.lower() not in self.accepted_extensions: 
                 print(f"File {file_name} is not an accepted image type. Skipping.")
                 return None
             
@@ -192,7 +203,7 @@ class HotfolderHandler(FileSystemEventHandler):
        
         # Check if file is a reprint, sends it straight to a hotfolder.
         try:  
-            reprint_match = re.search(reprint_pattern, file_name, re.IGNORECASE).group(1)
+            reprint_match = re.search(self.reprint_pattern, file_name, re.IGNORECASE).group(1)
         except AttributeError:
             reprint_match = None
         print(f"Reprint: {reprint_match}")
@@ -309,5 +320,11 @@ if __name__ == "__main__":
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
+        observer.stop()
+    except Exception as e:
+        print(f"Critical Error: {e}")
+        error_subject = "MOD Preflight Script Critical Error"
+        error_body = f"MOD Preflight Script has encountered a critical error at {time.strftime('%Y-%m-%d %H:%M:%S')}. Please check the script."
+        auto_emails.send_email(email_config_path, error_subject, error_body)
         observer.stop()
     observer.join()

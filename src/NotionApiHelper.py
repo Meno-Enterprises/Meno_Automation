@@ -194,7 +194,7 @@ class NotionApiHelper:
             Returns:
                 dict: The JSON response from the Notion API.
         """
-        jsonBody = json.dumps({"parent": {"database_id": databaseID}, "properties": properties})
+        jsonBody = {"parent": {"database_id": databaseID}, "properties": properties}
         try:
             print(f"{self.endPoint}/pages")
             response = requests.post(f"{self.endPoint}/pages", headers=self.headers, json=jsonBody)
@@ -219,12 +219,13 @@ class NotionApiHelper:
         Sends a patch request to a specified Notion page, updating the page with the specified properties. Returns the response as a JSON object. Will return {} if the request errors out.
         Page property keys can be either the property name or property ID.
         '''
-        jsonBody = json.dumps({"properties": properties})
+        jsonBody = {"properties": properties}
         print(jsonBody)
         try:
             print("Sending patch request...")
             print(f"{self.endPoint}/pages/{pageID}")
             response = requests.patch(f"{self.endPoint}/pages/{pageID}", headers=self.headers, json=jsonBody)
+            # print(response.text)
             response.raise_for_status()
             self.counter = 0
             return response.json()
