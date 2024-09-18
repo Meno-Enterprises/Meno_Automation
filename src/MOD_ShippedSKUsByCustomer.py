@@ -1,9 +1,9 @@
 from NotionApiHelper import NotionApiHelper
 from AutomatedEmails import AutomatedEmails
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 import csv, os, time
 
-print("Starting Daily Report...")
+print("Starting Weekly Shipped SKUs Report...")
 notion_helper = NotionApiHelper()
 csv_directory = "MOD_WeeklyReportOutput"
 os.makedirs(csv_directory, exist_ok=True)

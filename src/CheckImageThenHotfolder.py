@@ -173,7 +173,7 @@ class HotfolderHandler(FileSystemEventHandler):
         if ".~#~" in file_path:  
             print(f"File {file_path} is a temporary file. Waiting.")
             file_path = file_path.replace(".~#~", "")
-            time.sleep(15)
+            time.sleep(5)
             if os.path.exists(file_path) == False:
                 print(f"File took too long to copy, skipping.")
                 return None
