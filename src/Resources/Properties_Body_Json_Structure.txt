@@ -1,0 +1,124 @@
+
+"checkbox" | "email" | "number" | "phone_number" | "url"
+	Args: (str) prop_name, (str) prop_type, (str/bool/float) prop_value
+	{
+		prop_name: {
+			prop_type: prop_value
+		}
+	}
+
+"select" | "status"
+	Args: (str) prop_name, (str) prop_type, (str) prop_value
+	{
+		prop_name: {
+			prop_type: {
+				"name": prop_value
+			}
+		}
+	}
+
+"date"
+	Args (str) prop_name, (str) date_start, (str) date_end
+	{
+		prop_name: {
+			"date": {
+				"start": date_start,
+				"end": date_end
+			}
+		}
+	}
+
+"files"
+	Args: (str) prop_name, (str) file_name, (str) file_url
+	{
+		prop_name: {
+			"files": [
+			{
+				"name": file_name,
+				"external": {
+					"url": file_url
+				}
+			}
+			]
+		}
+	}	
+
+
+"multi-select"
+	Args: (str) prop_name, (array[str]) prop_value
+	{
+		prop_name: {
+		"multi-select": [
+			{
+			"name": prop_value[0]
+			},
+			{
+			"name": prop_value[1]
+			}
+			]
+		}
+	}
+
+"relation"
+	Args: (str) prop_name, (array[str]) prop_value
+	{
+		prop_name: {
+		"relation": [
+			{
+			"id": prop_value[0]
+			},
+			{
+			"id": prop_value[1]
+			}
+			]
+		}
+	}
+
+"people"
+	Args: (str) prop_name, (array[str]) id_var[""]
+	{
+		prop_name: {
+		"people": [
+			{
+			"object": "user",
+			"id": id_var[0]
+			},
+			{
+			"object": "user",
+			"id": id_var[1]
+			}
+			]
+		}
+	}
+
+
+"Rich-Text"/"Title"
+	Args: (str) prop_name, (str) prop_type, (str) prop_value, (str)(opt.) prop_value_link, (bool)(opt.) bold, (bool)(opt.) italic, (bool)(opt.) strikethrough, (bool)(opt.) underline, (bool)(opt.) code, (str)(opt.) color
+		Colors: "blue", "blue_background", "brown", "brown_background", "default", "gray", "gray_background", "green", "green_background", "orange", "orange_background", "pink", "pink_background", "purple", "purple_background", "red", "red_background", "yellow", "yellow_background"
+	{
+		prop_name: {
+
+			"id": "title", 	-for Title only
+			"type": "title", -for Title only
+			
+			prop_type: [
+			{
+				"type": "text",
+				"text": {
+					"content": prop_value,
+					"link": prop_value_link default: null
+				},
+				"annotations": {
+					"bold": bold,	default: false
+					"italic": italic,	default: false
+					"strikethrough": strikethrough,		default: false
+					"underline": underline,		default: false
+					"code": code,	default: false
+					"color": color default: "default"
+				},
+				"plain_text": prop_value,
+				"href": prop_value_link default: null
+			}
+			]
+		}
+	}

@@ -1,3 +1,35 @@
+#!/usr/bin/env python3
+# Aria Corona Sept 19th, 2024
+
+'''
+This is a script that sends automated emails. It is intended to be called by other scripts when needed. 
+It uses the smtplib library to send emails via an SMTP server. The email configuration is loaded from a JSON file, which should contain the SMTP server details, sender and recipient addresses, and other relevant information.
+
+The send_email method takes the path to the email configuration file, the subject and body of the email, and an optional list of file paths for attachments. 
+It constructs the email message, attaches any files, and sends the email using the specified SMTP server.
+
+Dependencies:
+- None
+
+send_email method parameters:
+- email_config_path (str): The path to the email configuration JSON file. Required. If the file is not found or vital details are missing, the method will return without sending an email.
+- subject (str): The subject of the email. Optional, defaults to an empty string.
+- body (str): The body of the email. Optional, defaults to an empty string.
+- file_attachment_paths (list of str): A list of file paths for attachments. Optional, defaults to None.
+
+Example configuration file (email_config.json):
+{
+    "smtp_server": "smtp.example.com",
+    "smtp_port": 587,
+    "smtp_username": "username@user.com",
+    "smtp_password": "password123",
+    "from_name": "Sender Name",
+    "from_email": "sender@example.com",
+    "to_email": ["recipient@example.com"],
+    "cc_email": ["cc_recipient1@example.com", "cc_recipient2@example.com"],
+    "bcc_email": []
+}
+'''
 
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -13,34 +45,6 @@ class AutomatedEmails:
 
     # string, string = "", string = "", list of strings = None
     def send_email(self, email_config_path, subject = "", body = "", file_attachment_paths = None): 
-        '''
-        This is a script that sends automated emails. It is intended to be called by other scripts when needed. 
-        It uses the smtplib library to send emails via an SMTP server. The email configuration is loaded from a JSON file, which should contain the SMTP server details, sender and recipient addresses, and other relevant information.
-
-        The send_email method takes the path to the email configuration file, the subject and body of the email, and an optional list of file paths for attachments. 
-        It constructs the email message, attaches any files, and sends the email using the specified SMTP server.
-
-        send_email method parameters:
-        
-            email_config_path (str): The path to the email configuration JSON file. Required. If the file is not found or vital details are missing, the method will return without sending an email.
-            subject (str): The subject of the email. Optional, defaults to an empty string.
-            body (str): The body of the email. Optional, defaults to an empty string.
-            file_attachment_paths (list of str): A list of file paths for attachments. Optional, defaults to None.
-
-        Example configuration file (email_config.json):
-
-        {
-            "smtp_server": "smtp.example.com",
-            "smtp_port": 587,
-            "smtp_username": "username@user.com",
-            "smtp_password": "password123",
-            "from_name": "Sender Name",
-            "from_email": "sender@example.com",
-            "to_email": ["recipient@example.com"],
-            "cc_email": ["cc_recipient1@example.com", "cc_recipient2@example.com"],
-            "bcc_email": []
-        }
-        '''
         def load_email_config(email_config_file_name):
             print(f"Loading email configuration from {email_config_file_name}...")
             try:

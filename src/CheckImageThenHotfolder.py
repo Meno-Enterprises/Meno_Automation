@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+# Aria Corona Sept 19th, 2024
+# This script is designed to monitor a hotfolder for new files, check if they are images, and process them for preflight.
+
 import time, os, re, shutil
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -126,7 +130,7 @@ class HotfolderHandler(FileSystemEventHandler):
                 print(f"Error copying file to tmp folder: {e}")
         except Exception as e:
             print(f"Error resizing image: {e}")
-            self.report_error(job_id, f"Error resizing image: {e}\nFind Aria and let her know this broke.", 3)
+            self.report_error(job_id, f"Error resizing image: {e}\nFind Aria and let her know this broke.", 4)
         pass
 
     def move_to_hotfolder(self, hotfolder, file_name):
@@ -140,20 +144,22 @@ class HotfolderHandler(FileSystemEventHandler):
         os.rename(current_path, new_path)
         pass
 
-    def report_error(self, job_id, error_message, level = 0): # level 0: update note only, level 1: DPI Change, lvevl 2: Resize, level 3: stop job
+    def report_error(self, job_id, error_message, level = 0): # level 0: update note only, level 1: DPI Change, lvevl 2: Resize, level 3: stop job, level 4: job/product info related or critical error.
         properties = {}
         subject = f"MOD Preflight Error: {job_id}, level {level}"
         body = f"An error has occurred during preflight for https://notion.so/{job_id}.\n\nError message: {error_message}\n\nThis is an automated email being sent on behalf of Aria Corona, please do not reply. If you have any questions or concerns, please contact Aria directly at"
         notes = self.notion_helper.generate_property_body("Notes", "rich_text", [error_message])
         if level == 1:
-            tags = self.notion_helper.generate_property_body("Tags", "multi_select", ["DPI Changed"])
+            tags = self.notion_helper.generate_property_body("Tags", "multi_select", ["DPI Changed", "OOS"]) # Change job tags here.
         elif level == 2:
-            tags = self.notion_helper.generate_property_body("Tags", "multi_select", ["Resized"])
+            tags = self.notion_helper.generate_property_body("Tags", "multi_select", ["Resized", "OOS"]) # Change job tags here.
             #self.automated_emails.send_email(self.email_config_path, subject, body)
-        if level == 3:
+        if level >= 3:
             system_status = self.notion_helper.generate_property_body("System status", "select", "Error")
-            properties = {"Notes": notes["Notes"], "System status": system_status["System status"]}
-            #self.automated_emails.send_email(self.email_config_path, subject, body)            
+            #self.automated_emails.send_email(self.email_config_path, subject, body)
+            if level == 3:
+                tags = self.notion_helper.generate_property_body("Tags", "multi_select", ["OOS"]) 
+            properties = {"Notes": notes["Notes"], "System status": system_status["System status"], "Tags": tags["Tags"]}
         else:
             properties = {"Notes": notes["Notes"], "Tags": tags["Tags"]}
         print(f"Reporting error for job {job_id}: {error_message}\n{properties}")
@@ -179,7 +185,7 @@ class HotfolderHandler(FileSystemEventHandler):
                 return None
         time.sleep(5) # Wait for file to finish copying
         allow_alter = 0
-        print(f"Processing file: {file_path}")
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} - Processing file: {file_path}")
         file_name = os.path.basename(file_path)
 
         try:
@@ -214,7 +220,7 @@ class HotfolderHandler(FileSystemEventHandler):
                 hotfolder = reprint_output['properties']['Hot folder path']['formula']['string']
             except Exception as e:
                 print(f"Missing info for reprint {job_id} in Notion. Skipping.")
-                self.report_error(job_id, f"Missing reprint info in Notion: {e}", 3)
+                self.report_error(job_id, f"Missing reprint info in Notion: {e}", 4)
                 return None
             self.move_to_hotfolder(hotfolder, file_name)
             return None
@@ -228,7 +234,7 @@ class HotfolderHandler(FileSystemEventHandler):
             customer = job_output['properties']['Customer']['formula']['string']
         except Exception as e: 
             print(f"Could not find product ID in job {job_id}. Skipping.")
-            self.report_error(job_id, f"Missing product or customer in Notion: {e}", 3)
+            self.report_error(job_id, f"Missing product or customer in Notion: {e}", 4)
             self.remove_file(file_path)
             return None
 
@@ -236,7 +242,7 @@ class HotfolderHandler(FileSystemEventHandler):
             allow_alter = self.customer_preflight_approval[customer]
         except KeyError:
             print(f"Customer {customer} not found in preflight approval list. Skipping.")
-            self.report_error(job_id, f"Customer not found in preflight approval list.", 3)
+            self.report_error(job_id, f"Customer not found in preflight approval list.", 4)
             self.remove_file(file_path)
             return None
 
@@ -248,13 +254,13 @@ class HotfolderHandler(FileSystemEventHandler):
             hotfolder = product_output['properties']['Hot Folder']['select']['name']
         except Exception as e:
             print(f"Missing info for {product_id} in Notion. Skipping. {e}")
-            self.report_error(job_id, f"Missing product info in Notion: {e}", 3)
+            self.report_error(job_id, f"Missing product info in Notion: {e}", 4)
             self.remove_file(file_path)
             return None
         
         if xpix == None or ypix == None or hotfolder == None: 
             print(f"Missing product info for {product_id} in Notion. Skipping.")
-            self.report_error(job_id, "Missing product info in Notion.", 3)
+            self.report_error(job_id, "Missing product info in Notion.", 4)
             self.remove_file(file_path)
             return None
 

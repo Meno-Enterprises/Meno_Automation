@@ -1,3 +1,18 @@
+#!/usr/bin/env python3
+# Aria Corona Sept 19th, 2024
+# Daily Report script for Meno On-Demand.
+# This script will query the Meno On-Demand Notion database for all jobs created in the past week, and generate a CSV report with the following information:
+# - Total active jobs by customer
+# - Total active items by product
+# - Job status counts
+# The script will then send an email with the CSV report attached.
+
+'''
+Dependencies:
+- NotionApiHelper.py
+- AutomatedEmails.py
+'''
+
 from NotionApiHelper import NotionApiHelper
 from AutomatedEmails import AutomatedEmails
 from datetime import datetime, timezone, timedelta
@@ -8,7 +23,14 @@ notion_helper = NotionApiHelper()
 csv_directory = "DailyReportOutput"
 csv_file_name = os.path.join(csv_directory, f"MOD_Daily_Report_{datetime.now().strftime('%Y-%m-%d')}.csv")
 os.makedirs(csv_directory, exist_ok=True)
-content_filter = {"and": [{"property": "Job status", "select": {"does_not_equal": "Canceled"}}, {"property": "Created", "date": {"past_week": {}}}]}
+content_filter = {
+    "and": [
+        {"property": "Job status", "select": {"does_not_equal": "Canceled"}},
+        {"property": "Created", "date": {"past_week": {}}},
+        {"property": "Product Description", "formula": {"string": {"is_not_empty": True}}},
+        {"property": "Quantity", "number": {"is_greater_than": 0}}
+    ]
+}
 today = datetime.now(timezone.utc)
 customer_dict = {}
 product_dict = {}
@@ -120,4 +142,4 @@ attachment_path = [csv_file_name]
 subject = f"MOD Daily Report {datetime.now().strftime('%m-%d-%Y')}"
 body = "Please find the attached daily report for Meno On-Demand.\n\n\nThis is an automated email being sent on behalf of Aria Corona, please do not reply. If you have any questions or concerns, please contact Aria directly at acorona@menoenterprises.com."
 automated_emails.send_email(email_config_path, subject, body, attachment_path)
-print("End of script.")
+print("End of script.") 

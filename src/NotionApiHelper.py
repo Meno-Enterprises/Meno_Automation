@@ -1,5 +1,190 @@
-import requests, time, json, logging
+#!/usr/bin/env python3
+# Aria Corona Sept 19th, 2024
+# Notion API Helper
+# This script is designed to assist in the interaction with the Notion API, providing a series of functions to query, create, and update pages in a Notion database.
+# It has not been extensively tested and may require further development to be fully functional. (Specifically the create_page() function)
 
+'''
+Dependencies:
+- None, but requires the headers.json file to be present in the same directory as the script. Notion API requires authentication and the Notion API version as headers.
+'''
+
+
+#  query(self, databaseID, filter_properties = None, content_filter = None, page_num = None):
+"""
+Sends a post request to a specified Notion database, returning the response as a dictionary. Will return {} if the request fails.
+query(string, list(opt.), dict(opt.),int(opt.)) -> dict
+
+    Args:
+        databaseID (str): The ID of the Notion database.
+        filter_properties (list): Filter properties as a list of strings. Optional.
+            Can be used to filter which page properties are returned in the response.
+            Example: ["%7ChE%7C", "NPnZ", "%3F%5BWr"]
+        content_filter (dict): Content filter as a dictionary. Optional.
+            Can be used to filter pages based on the specified properties.
+            Example: 
+                {
+                    "and": [
+                        {
+                            "property": "Job status",
+                            "select": {
+                                "does_not_equal": "Canceled"
+                            }
+                        },
+                        {
+                            "property": "Created",
+                            "date": {
+                                "past_week": {}
+                            }
+                        }
+                    ]
+                }
+        page_num (int): The number of pages to retrieve. Optional.
+            If not specified, all pages will be retrieved.
+
+    Returns:
+        dict: The "results" of the JSON response from the Notion API. This will cut out the pagination information, returning only the page data.
+
+Additional information on content filters can be found at https://developers.notion.com/reference/post-database-query-filter#the-filter-object
+Additional information on Notion queries can be found at https://developers.notion.com/reference/post-database-query
+"""
+
+#  get_page(self, pageID):
+"""
+Sends a get request to a specified Notion page, returning the response as a dictionary. Will return {} if the request fails.
+Relation properties are capped at 25 items, and will return a truncated list if the relation has more than 25 items. This is a limitation of the Notion API.
+    Use the get_page_property method to retrieve the full list of relation items.
+
+get_object(string) -> dict
+
+    Args:
+        databaseID (str): The ID of the Notion database.
+
+    Returns:
+        dict: The JSON response from the Notion API.
+"""
+
+#  get_page_property(self, pageID, propID):
+"""
+Sends a get request to a specified Notion page property, returning the response as a JSON property item object. Will return {} if the request fails.
+https://developers.notion.com/reference/property-item-object
+
+get_object(string) -> dict
+
+    Args:
+        pageID (str): The ID of the Notion database.
+        propID (str): The ID of the property to retrieve.
+
+    Returns:
+        dict: The JSON response from the Notion API.
+"""
+
+#  create_page(self, databaseID, properties):
+"""
+Sends a post request to a specified Notion database, creating a new page with the specified properties. Returns the response as a dictionary. Will return {} if the request fails.
+
+create_page(string, dict) -> dict
+
+    Args:
+        databaseID (str): The ID of the Notion database.
+        properties (dict): The properties of the new page as a dictionary.
+
+    Returns:
+        dict: The dictionary response from the Notion API.
+"""
+
+#  update_page(self, pageID, properties, trash = False):
+'''
+Sends a patch request to a specified Notion page, updating the page with the specified properties. Returns the response as a dictionary. Will return {} if the request errors out.
+Page property keys can be either the property name or property ID.
+
+update_page(string, dict) -> dict
+    Args:
+        pageID (str): The ID of the Notion page.
+        properties (dict): The properties of the page as a dictionary.
+        trash (bool): Optional. If True, the page will be moved to the trash. Default is False.
+
+    Returns:
+        dict: The dictionary response from the Notion API.
+'''
+
+# generate_property_body(self, prop_name, prop_type, prop_value, prop_value2 = None, annotation = None):
+'''
+Accepts a range of property types and generates a dictionary based on the input.
+    Accepted property types is a string from the following list:
+        "checkbox" | "email" | "number" | "phone_number" | "url" | "select" | "status" | "date" | "files" | "multi_select" | "relation" | "people" | "rich_text" | "title"
+    Args:
+    - prop_name (string): The name of the property.
+    - prop_type (string): The type of the property.
+    - prop_value (string/number/bool/array of strings): The value of the property.
+    - prop_value2 (string/array of strings): The second value of the property. Optional.
+    - annotation (array of dict): The annotation of the property. Optional.
+        - Dictionary format: [{"bold": bool, "italic": bool, "strikethrough": bool, "underline": bool, "code": bool, "color": string}]
+        - default annotations: {"bold": False, "italic": False, "strikethrough": False, "underline": False, "code": False, "color": "default"}
+        - Acceptable Colors: Colors: "blue", "blue_background", "brown", "brown_background", "default", "gray", "gray_background", "green", "green_background", "orange", "orange_background", "pink", "pink_background", "purple", "purple_background", "red", "red_background", "yellow", "yellow_background"
+    Returns:
+    - dict: The python dictionary object of a property, formatted to fit as one of the properties in a page POST/PATCH request.
+
+    Checkbox, Email, Number, Phone Number, URL:
+        Property Name: string as the name of the property field in Notion
+        Property Type: string as "checkbox" | "email" | "number" | "phone_number" | "url"
+        Property Value: string/number/bool to be uploaded.
+
+    Select, Status:
+        Property Name: string as the name of the property field in Notion
+        Property Type: string as "select" | "status"
+        Property Value: string to be uploaded. Will create a new select/status if it does not exist.
+
+    Date:
+        Property Name: string as the name of the property field in Notion
+        Property Type: string as "date"
+        Start Date Value: string (ISO 8601 date and optional time) as "2020-12-08T12:00:00Z" or "2020-12-08"
+        End Date Value: optional string (ISO 8601 date and optional time) as "2020-12-08T12:00:00Z" or "2020-12-08"
+            End date will default to None if not provided, meaning the date is not a range.
+
+    Files:
+        Property Name: string as the name of the property field in Notion
+        Property Type: string as "files"
+        File Names: Array of string
+        File URLs: Array of string
+
+    Multi-Select:
+        Property Name: string as the name of the property field in Notion
+        Property Type: string as "multi_select"
+        Property Value: Array of strings
+
+    Relation:
+        Property Name: string as the name of the property field in Notion
+        Property Type: string as "relation"
+        Property Value: Array of strings
+
+    People:
+        Property Name: string as the name of the property field in Notion
+        Property Type: string as "people"
+        Property Value: Array of strings
+
+    Rich Text:
+        Property Name: string as the name of the property field in Notion
+        Property Type: string as "rich_text"
+        Property Value: Array of strings 
+        Property Value Link: Array of strings [opt.]
+        Annotation: Array of dictionaries [opt.]
+            Dictionary format: [{"bold": bool, "italic": bool, "strikethrough": bool, "underline": bool, "code": bool, "color": string}]
+            default annotations: {"bold": False, "italic": False, "strikethrough": False, "underline": False, "code": False, "color": "default"}
+            Acceptable Colors: Colors: "blue", "blue_background", "brown", "brown_background", "default", "gray", "gray_background", "green", "green_background", "orange", "orange_background", "pink", "pink_background", "purple", "purple_background", "red", "red_background", "yellow", "yellow_background"
+
+    Title:
+        Property Name: string as the name of the property field in Notion
+        Property Type: string as "title"
+        Property Value: Array of strings
+        Property Value Link: Array of strings
+        Annotation: Array of dictionaries
+            Dictionary format: [{"bold": bool, "italic": bool, "strikethrough": bool, "underline": bool, "code": bool, "color": string}]
+            default annotations: {"bold": False, "italic": False, "strikethrough": False, "underline": False, "code": False, "color": "default"}
+            Acceptable Colors: Colors: "blue", "blue_background", "brown", "brown_background", "default", "gray", "gray_background", "green", "green_background", "orange", "orange_background", "pink", "pink_background", "purple", "purple_background", "red", "red_background", "yellow", "yellow_background"
+'''
+
+import requests, time, json, logging
 
 class NotionApiHelper:
     MAX_RETRIES = 3
@@ -14,46 +199,9 @@ class NotionApiHelper:
         
         self.endPoint = "https://api.notion.com/v1"
         self.counter = 0
-
     
     def query(self, databaseID, filter_properties = None, content_filter = None, page_num = None):
-        """
-        Sends a post request to a specified Notion database, returning the response as a JSON object. Will return {} if the request fails.
-        query(string, list(opt.), dict(opt.),int(opt.)) -> dict
 
-            Args:
-                databaseID (str): The ID of the Notion database.
-                filter_properties (list): Filter properties as a list of strings. Optional.
-                    Can be used to filter which page properties are returned in the response.
-                    Example: ["%7ChE%7C", "NPnZ", "%3F%5BWr"]
-                content_filter (dict): Content filter as a JSON object. Optional.
-                    Can be used to filter pages based on the specified properties.
-                    Example: 
-                        {
-                            "and": [
-                                {
-                                    "property": "Job status",
-                                    "select": {
-                                        "does_not_equal": "Canceled"
-                                    }
-                                },
-                                {
-                                    "property": "Created",
-                                    "date": {
-                                        "past_week": {}
-                                    }
-                                }
-                            ]
-                        }
-                page_num (int): The number of pages to retrieve. Optional.
-                    If not specified, all pages will be retrieved.
-
-            Returns:
-                dict: The "results" of the JSON response from the Notion API. This will cut out the pagination information, returning only the page data.
-
-        Additional information on content filters can be found at https://developers.notion.com/reference/post-database-query-filter#the-filter-object
-        Additional information on Notion queries can be found at https://developers.notion.com/reference/post-database-query
-        """
         databaseJson = {}
         get_all = page_num is None
         page_size = self.PAGE_SIZE if get_all else page_num
@@ -115,18 +263,6 @@ class NotionApiHelper:
                 return {}
 
     def get_page(self, pageID):
-        """
-        Sends a get request to a specified Notion page, returning the response as a JSON object. Will return {} if the request fails.
-        
-        
-        get_object(string) -> dict
-
-            Args:
-                databaseID (str): The ID of the Notion database.
-
-            Returns:
-                dict: The JSON response from the Notion API.
-        """
         try:
             time.sleep(0.5) # To avoid rate limiting
             print(f"{self.endPoint}/pages/{pageID}")
@@ -146,21 +282,7 @@ class NotionApiHelper:
                 self.counter = 0
                 return {}
         
-
     def get_page_property(self, pageID, propID):
-        """
-        Sends a get request to a specified Notion page property, returning the response as a JSON property item object. Will return {} if the request fails.
-        https://developers.notion.com/reference/property-item-object
-
-        get_object(string) -> dict
-
-            Args:
-                pageID (str): The ID of the Notion database.
-                propID (str): The ID of the property to retrieve.
-
-            Returns:
-                dict: The JSON response from the Notion API.
-        """
         try:
             time.sleep(0.5) # To avoid rate limiting
             print(f"{self.endPoint}/pages/{pageID}/properies/{propID}")
@@ -180,20 +302,7 @@ class NotionApiHelper:
                 self.counter = 0
                 return {}
 
-
     def create_page(self, databaseID, properties): # Will update to allow icon and cover images later.
-        """
-        Sends a post request to a specified Notion database, creating a new page with the specified properties. Returns the response as a JSON object. Will return {} if the request fails.
-
-        create_page(string, dict) -> dict
-
-            Args:
-                databaseID (str): The ID of the Notion database.
-                properties (dict): The properties of the new page as a JSON object.
-
-            Returns:
-                dict: The JSON response from the Notion API.
-        """
         jsonBody = {"parent": {"database_id": databaseID}, "properties": properties}
         try:
             print(f"{self.endPoint}/pages")
@@ -213,12 +322,7 @@ class NotionApiHelper:
                 self.counter = 0
                 return {}
             
-
     def update_page(self, pageID, properties, trash = False): # Will update to allow icon and cover images later.
-        '''
-        Sends a patch request to a specified Notion page, updating the page with the specified properties. Returns the response as a JSON object. Will return {} if the request errors out.
-        Page property keys can be either the property name or property ID.
-        '''
         jsonBody = {"properties": properties}
         print(jsonBody)
         try:
@@ -242,130 +346,22 @@ class NotionApiHelper:
                 return {}
 
 
-    '''
-    def properties_to_json(self):   #SHELVED FOR THE TIME BEING
-        """
-        Opens a GUI window with select and text fields to input the properties of a new Notion page. Returns the properties as a JSON object formatted for the NotionAPI.
-        https://developers.notion.com/reference/page-property-values
-        
-        properties_to_json(list) -> dict
-
-        Returns:
-            dict: The properties as a python dictionary.
-        """
-        properties = {}
-        properties_list = []
-        no_var = ["checkbox", "email", "number", "phone_number", "url"]
-        one_var = ["select", "status"]
-        two_var = ["date"]
-        nested_var_multi = ["files"]
-        one_var_multi = ["multi_select", "relation"]
-        two_var_multi = ["people"]
-        rich_text_multi = ["rich_text", "title"]
-
-        def save_properties():
-            properties["Property Name"] = property_name_entry.get()
-            properties["Property Type"] = property_type.get()
-            properties["Property Value"] = property_value_entry1.get()
-            
-
-            root.destroy()
-
-        def property_pack(json_properties = []): 
-            entry1 = property_name_entry.get() if property_name_entry.get() else ""
-            entry2 = property_type.get() if property_type.get() else ""
-            entry3 = property_value_entry1.get() if property_value_entry1.get() else ""
-            if entry2 == "checkbox":
-                json_properties.append({entry1: {entry2: entry3}})
-            elif entry2 == "date":
-                json_properties.append({entry1: {entry2: {"start": entry3}}})
-            property_name_entry.delete(0, tk.END)
-            property_type.set("Select One")
-            property_value_entry1.delete(0, tk.END)
-            return json_properties
-
-        def propselect(*args):
-            widget_destroy()
-            widget_pack()
-
-        def widget_pack():
-            save_button.pack()
-            add_button.pack()
-            property_name_label.pack()
-            property_name_entry.pack()
-            porperty_type_label.pack()
-            prop_type_dropdown.pack()
-            if property_type.get() in no_var or property_type.get() in one_var:
-                property_value_label1.pack()
-                property_value_entry1.pack()
-
-        def widget_destroy():
-            property_name_label.destroy()
-            property_name_entry.destroy()
-            porperty_type_label.destroy()
-            prop_type_dropdown.destroy()
-            property_value_label1.destroy()
-            property_value_entry1.destroy()
-            datestart_label.destroy()
-            datestart.destroy()
-            dateend_label.destroy()
-            dateend.destroy()
-
-        def one_var_format():
-            name = property_name_entry.get()
-            prop = property_type.get()
-            value = property_value_entry1.get()
-            properties_list.append(str({prop: {name: { "name": value}}}))
-            print(str({prop: {name: { "name": value}}}))
-
-        root = tk.Tk()
-        root.title("Notion Page Properties Generator")
-        root.geometry("400x400")
-
-        # Define all the widgets
-        datestart = tk.Entry(root)
-        datestart_label = tk.Label(root, text="Start Date")
-        dateend = tk.Entry(root)
-        dateend_label = tk.Label(root, text="End Date (Optional)")
-        property_name_label = tk.Label(root, text="Property Name")
-        property_name_entry = tk.Entry(root)
-        porperty_type_label = tk.Label(root, text="Property Type")
-        property_type = tk.StringVar(root)
-        property_type.set("Select One")
-        property_type.trace_add("write", propselect)
-        prop_type_dropdown = tk.OptionMenu(root, property_type, "date", "number")
-        property_value_label1 = tk.Label(root, text="Property Value")
-        property_value_entry1 = tk.Entry(root)
-        save_button = tk.Button(root, text="Save", command=save_properties)
-        add_button = tk.Button(root, text="Add Another Property", command=property_pack)
-
-        # Load the initial widgets
-        widget_pack()
-
-
- 
-
-        root.mainloop()
-
-        return properties
-    '''
-
     def simple_prop_gen(self, prop_name, prop_type, prop_value):
         '''
-        Generates a simple property JSON object.
+        Generates a simple property dictionary.
         "checkbox" | "email" | "number" | "phone_number" | "url"
         '''
         return {prop_name: {prop_type: prop_value}}
     
     def selstat_prop_gen(self, prop_name, prop_type, prop_value):
         '''
-        Generates a select or status property JSON object.
+        Generates a select or status property dictionary.
         '''
         return {prop_name: {prop_type: {"name": prop_value}}}
     
     def date_prop_gen(self, prop_name, prop_type, prop_value, prop_value2):
         '''
-        Generates a date property JSON object.
+        Generates a date property dictionary.
         '''
         if prop_value2 is None:
             return {prop_name: {prop_type: {"start": prop_value}}}
@@ -374,7 +370,7 @@ class NotionApiHelper:
         
     def files_prop_gen(self, prop_name, prop_type, file_names, file_urls):
         '''
-        Generates a files property JSON object.
+        Generates a files property dictionary.
         '''
         if file_names is None or file_urls is None:
             return {}
@@ -385,7 +381,7 @@ class NotionApiHelper:
 
     def mulsel_prop_gen(self, prop_name, prop_type, prop_values):
         '''
-        Generates a multi-select or relation property JSON object.
+        Generates a multi-select or relation property dictionary.
         '''
         prop_value_new = []
         for value in prop_values:
@@ -394,7 +390,7 @@ class NotionApiHelper:
 
     def relation_prop_gen(self, prop_name, prop_type, prop_values):
         '''
-        Generates a relation property JSON object.
+        Generates a relation property dictionary.
         '''
         prop_value_new = []
         for value in prop_values:
@@ -403,7 +399,7 @@ class NotionApiHelper:
     
     def people_prop_gen(self, prop_name, prop_type, prop_value):
         '''
-        Generates a people property JSON object.
+        Generates a people property dictionary.
         '''
         prop_value_new = []
         for value in prop_value:
@@ -412,7 +408,7 @@ class NotionApiHelper:
     
     def rich_text_prop_gen(self, prop_name, prop_type, prop_value, prop_value_link = None, annotation = None):
         '''
-        Generates a rich text property JSON object.
+        Generates a rich text property dictionary.
         '''
         default_annotations = {"bold": False, "italic": False, "strikethrough": False, "underline": False, "code": False, "color": "default"}
         rich_body = []
@@ -432,7 +428,7 @@ class NotionApiHelper:
     
     def title_prop_gen(self, prop_name, prop_type, prop_value, prop_value_link = None, annotation = None):
         '''
-        Generates a title property JSON object.
+        Generates a title property dictionary.
         '''
         default_annotations = {"bold": False, "italic": False, "strikethrough": False, "underline": False, "code": False, "color": "default"}
         rich_body = []
@@ -451,80 +447,7 @@ class NotionApiHelper:
         return {prop_name: {"id": prop_type, "type": prop_type, prop_type: rich_body}}
 
     def generate_property_body(self, prop_name, prop_type, prop_value, prop_value2 = None, annotation = None): # Should have been named generate_body_property, will fix in future.
-        '''
-        Accepts a range of property types and generates a JSON object based on the input.
-            Accepted property types is a string from the following list:
-                "checkbox" | "email" | "number" | "phone_number" | "url" | "select" | "status" | "date" | "files" | "multi_select" | "relation" | "people" | "rich_text" | "title"
-            Args:
-                prop_name (string): The name of the property.
-                prop_type (string): The type of the property.
-                prop_value (string/number/bool/array of strings): The value of the property.
-                prop_value2 (string/array of strings): The second value of the property. Optional.
-                annotation (array of dict): The annotation of the property. Optional.
-                    Dictionary format: [{"bold": bool, "italic": bool, "strikethrough": bool, "underline": bool, "code": bool, "color": string}]
-                    default annotations: {"bold": False, "italic": False, "strikethrough": False, "underline": False, "code": False, "color": "default"}
-                    Acceptable Colors: Colors: "blue", "blue_background", "brown", "brown_background", "default", "gray", "gray_background", "green", "green_background", "orange", "orange_background", "pink", "pink_background", "purple", "purple_background", "red", "red_background", "yellow", "yellow_background"
-            Returns:
-                dict: The python dictionary object of a property, formatted to fit as one of the properties in a page POST/PATCH request.
 
-            Checkbox, Email, Number, Phone Number, URL:
-                Property Name: string as the name of the property field in Notion
-                Property Type: string as "checkbox" | "email" | "number" | "phone_number" | "url"
-                Property Value: string/number/bool to be uploaded.
-
-            Select, Status:
-                Property Name: string as the name of the property field in Notion
-                Property Type: string as "select" | "status"
-                Property Value: string to be uploaded. Will create a new select/status if it does not exist.
-
-            Date:
-                Property Name: string as the name of the property field in Notion
-                Property Type: string as "date"
-                Start Date Value: string (ISO 8601 date and optional time) as "2020-12-08T12:00:00Z" or "2020-12-08"
-                End Date Value: optional string (ISO 8601 date and optional time) as "2020-12-08T12:00:00Z" or "2020-12-08"
-                    End date will default to None if not provided, meaning the date is not a range.
-
-            Files:
-                Property Name: string as the name of the property field in Notion
-                Property Type: string as "files"
-                File Names: Array of string
-                File URLs: Array of string
-
-            Multi-Select:
-                Property Name: string as the name of the property field in Notion
-                Property Type: string as "multi_select"
-                Property Value: Array of strings
-
-            Relation:
-                Property Name: string as the name of the property field in Notion
-                Property Type: string as "relation"
-                Property Value: Array of strings
-
-            People:
-                Property Name: string as the name of the property field in Notion
-                Property Type: string as "people"
-                Property Value: Array of strings
-
-            Rich Text:
-                Property Name: string as the name of the property field in Notion
-                Property Type: string as "rich_text"
-                Property Value: Array of strings 
-                Property Value Link: Array of strings [opt.]
-                Annotation: Array of dictionaries [opt.]
-                    Dictionary format: [{"bold": bool, "italic": bool, "strikethrough": bool, "underline": bool, "code": bool, "color": string}]
-                    default annotations: {"bold": False, "italic": False, "strikethrough": False, "underline": False, "code": False, "color": "default"}
-                    Acceptable Colors: Colors: "blue", "blue_background", "brown", "brown_background", "default", "gray", "gray_background", "green", "green_background", "orange", "orange_background", "pink", "pink_background", "purple", "purple_background", "red", "red_background", "yellow", "yellow_background"
-        
-            Title:
-                Property Name: string as the name of the property field in Notion
-                Property Type: string as "title"
-                Property Value: Array of strings
-                Property Value Link: Array of strings
-                Annotation: Array of dictionaries
-                    Dictionary format: [{"bold": bool, "italic": bool, "strikethrough": bool, "underline": bool, "code": bool, "color": string}]
-                    default annotations: {"bold": False, "italic": False, "strikethrough": False, "underline": False, "code": False, "color": "default"}
-                    Acceptable Colors: Colors: "blue", "blue_background", "brown", "brown_background", "default", "gray", "gray_background", "green", "green_background", "orange", "orange_background", "pink", "pink_background", "purple", "purple_background", "red", "red_background", "yellow", "yellow_background"
-        '''
         type_dict = {
             'checkbox': self.simple_prop_gen(prop_name, prop_type, prop_value), # string, string, string
             'email': self.simple_prop_gen(prop_name, prop_type, prop_value), # string, string, string
