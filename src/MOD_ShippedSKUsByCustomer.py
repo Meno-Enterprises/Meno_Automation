@@ -1,3 +1,14 @@
+#!/usr/bin/env python3
+# Aria Corona Sept 19th, 2024
+# Script to pull data from Notion API and generate a weekly report of shipped SKUs by customer.
+
+'''
+Dependencies:
+- NotionApiHelper.py
+- AutomatedEmails.py
+- conf/MOD_ShippedSKUsByCustomer_Email_Conf.json
+'''
+
 from NotionApiHelper import NotionApiHelper
 from AutomatedEmails import AutomatedEmails
 from datetime import datetime
@@ -17,6 +28,7 @@ job_content_filter = {
         ]}
     ]
 }
+
 order_filter_properties = [r"oKZj", r"E%5Bqx", r"iLNe", r"%7B%7BfG", r"qW%7D%5E", r"gS%5Cd"] # Shipped Date, Order Number, Jobs, Customer Name, ID, Status
 job_filter_properties = [r"Oe~K", r"nNsG", r"vruu", r"zUY%3F", r"%7CVjk", r"KQKT", r"LIf%7B"] # Order ID, ID, Customer Name, Product ID, Product Description, Quantity, Job revenue
 order_db_id = "d2747a287e974348870a636fbfa91e3e"

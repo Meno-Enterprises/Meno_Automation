@@ -14,6 +14,7 @@ Dependencies:
 
 This script generates a weekly report of shipped orders for Meno On-Demand. It queries the Notion API for shipped orders and their associated jobs,
 and generates a CSV file for each customer with the shipped orders for that week. It then sends an email to each customer with their CSV file as an attachment.
+Sets all jobs to "Invoiced" in Notion after generating the report.
 '''
 
 print("Starting Weekly Shipped Orders Report...")
@@ -48,6 +49,7 @@ file_list = [] # List of file paths for email attachments (Shipped Orders)
 file_list_2 = [] # List of file paths for email attachments (First Party Orders)
 errored_jobs = []
 errored_orders = []
+order_id_list = []
 
 print("Querying Notion API for orders...")
 order_notion_response = notion_helper.query(order_db_id, order_filter_properties, order_content_filter)
@@ -142,6 +144,7 @@ for page in order_notion_response: # Iterating through Orders to find Shipped Or
                                     print(f"New first party order found: {order_number}")
 
                     output_key_list.append(order_number)
+                    order_id_list.append(page['id'])
                     print(f"New order found: {order_number}")
                     print(f"New line item found for order {order_number}: {job_dict[job_page_id]['Line Item']}")
                 else:   # Existing Order Number
@@ -212,4 +215,9 @@ email_config_path = "conf/MOD_FirstPartyOrders_Email_Conf.json"
 subject = f"MOD First Party Orders {datetime.now().strftime('%m-%d-%Y')}"
 body = "Attached are the first party orders for Meno On-Demand.\n\n\n\nThis is an automated email being sent by the MOD Shipped Orders by Customer script. Please do not reply to this email. If you have any questions or concerns, please contact Aria Corona directly at acorona@menoenterprises.com"
 automated_emails.send_email(email_config_path, subject, body, file_list_2)
+
+print(f"Updating Orders as shipped: {output_key_list}")
+order_status = notion_helper.generate_property_body("Status", "select", "Invoiced")
+for id in order_id_list:
+    notion_helper.update_page(id, order_status)
 print("End of script.")
