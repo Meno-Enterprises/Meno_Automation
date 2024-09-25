@@ -295,7 +295,7 @@ class NotionApiHelper:
                 logging.error(f"Network error occurred: {e}. Trying again in {self.RETRY_DELAY} seconds.")
                 time.sleep(self.RETRY_DELAY)
                 self.counter += 1
-                return self.get_page(pageID, propID)
+                return self.get_page_property(pageID, propID)
             else:    
                 logging.error(f"Network error occurred too many times: {e}")
                 time.sleep(3)
