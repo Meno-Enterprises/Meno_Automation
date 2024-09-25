@@ -11,6 +11,7 @@ from pathlib import Path
 from PIL import Image
 import json
 import logging
+import warnings
 
 '''
 Dependencies:
@@ -36,6 +37,7 @@ Image correction logic:
         4. If image size does not match target size:
             a. If customer is on approved preflight list, scale image, crop to correct aspect ratio and move to hotfolder.
             b. If customer is not on approved preflight list, report error and trash file. Order and related jobs are canceled and the customer is notified.
+            c. If customer is on the no-preflight list, crop to correct aspect ratio and size without scaling and move to hotfolder.
 '''
 
 class HotfolderHandler(FileSystemEventHandler):
@@ -46,6 +48,7 @@ class HotfolderHandler(FileSystemEventHandler):
         self.blank_config_path = r"conf/Blank_To_Email_Conf.json"
         self.temp_config_path = r"conf/Temp_To_Email_Conf.json"
         self.hotfolder_path = "//192.168.0.178/meno/Hotfolders"
+        self.canceled_order_path = r"output/MOD_Canceled_Orders.txt"
         self.image_pattern = r"(.+)\.(jpg|jpeg|png)$"
         self.db_pattern = r".*_(.*)__\d*"
         self.reprint_pattern = r".*--(REP)-\d*_.*"
@@ -54,6 +57,13 @@ class HotfolderHandler(FileSystemEventHandler):
         path = Path(r'conf/CustomerPreflightApproval.json')
         with open(path, 'r') as file:
             self.customer_preflight_approval = json.load(file)
+        with open(self.canceled_order_path, 'r') as file:
+            self.canceled_orders = file.readlines()
+
+        logging.basicConfig(filename='logs/hotfolder_handler.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+        warnings.simplefilter('ignore', Image.DecompressionBombWarning)
+        Image.MAX_IMAGE_PIXELS = 600000000     # Ups the max image size to account for large 300DPI images.
 
     def on_created(self, event):
         if event.is_directory:
@@ -65,9 +75,13 @@ class HotfolderHandler(FileSystemEventHandler):
 
     def get_image_info(self, image_path):
         print(f"Getting image info for {image_path}.")
-        image = Image.open(image_path)
-        size = image.size
-        dpi = image.info.get('dpi')
+        try:
+            image = Image.open(image_path)
+            size = image.size
+            dpi = image.info.get('dpi')
+        except Exception as e:
+            print(f"Error getting image info: {e}")
+            return None, -1
         return size, dpi
     
     def adjust_dpi_and_move(self, image, hotfolder, file_name):
@@ -135,8 +149,38 @@ class HotfolderHandler(FileSystemEventHandler):
         except Exception as e:
             print(f"Error resizing image: {e}")
             now = time.strftime('%Y-%m-%d %H:%M:%S')
-            self.report_error(job_id, f"{job_log}{now} - Error resizing image: {e}\nFind Aria and let her know this broke.", 4)
+            self.report_error(job_id, f"{job_log}{now} - Critical Error resizing image: {e}\nFind Aria and let her know this broke.", 4)
         pass
+
+    def crop_and_move(self, image, hotfolder, file_name, target_xpix, target_ypix, job_id, job_log):
+        print(f"Cropping image to {target_xpix},{target_ypix} and moving to {hotfolder}.")
+        try:
+            icc_profile = image.info.get('icc_profile') if 'icc_profile' in image.info else None
+            
+            left = (image.size[0] - target_xpix) / 2
+            top = (image.size[1] - target_ypix) / 2
+            right = (image.size[0] + target_xpix) / 2
+            bottom = (image.size[1] + target_ypix) / 2
+            print(f"Cropping image to {target_xpix},{target_ypix}.")
+            cropped_image = image.crop((int(left), int(top), int(right), int(bottom)))
+
+            new_path = f"{self.hotfolder_path}/{hotfolder}/{file_name}"
+            if os.path.exists(new_path):
+                print(f"File {file_name} already exists in {hotfolder}. Removing old file.")
+                self.remove_file(new_path)
+                time.sleep(5)
+            
+            if icc_profile:
+                cropped_image.save(new_path, dpi=(150, 150), icc_profile=icc_profile)
+            else:
+                cropped_image.save(new_path, dpi=(150, 150))
+            print(f"Corrected image to {target_xpix},{target_ypix} and moved to {hotfolder}.")   
+            time.sleep(1) 
+            shutil.copy(new_path, f"{self.hotfolder_path}/tmp/{file_name}")
+        except Exception as e:
+            print(f"Error resizing image: {e}")
+            now = time.strftime('%Y-%m-%d %H:%M:%S')
+            self.report_error(job_id, f"{job_log}{now} - Critical Error cropping image: {e}\nFind Aria and let her know this broke.", 4)
 
     def move_to_hotfolder(self, hotfolder, file_name):
         print(f"Moving file {file_name} to {hotfolder}.")
@@ -151,17 +195,20 @@ class HotfolderHandler(FileSystemEventHandler):
 
     def report_error(self, job_id, error_message, level = 0): # level 0: update note only, level 1: DPI Change, lvevl 2: Resize, level 3: stop job, level 4: job/product info related or critical error.
         properties = {}
-        subject = f"MOD Preflight Error: {job_id}, level {level}"
-        body = f"An error has occurred during preflight for https://notion.so/{job_id}.\n\nError message: {error_message}\n\nThis is an automated email being sent on behalf of Aria Corona, please do not reply. If you have any questions or concerns, please contact Aria directly at"
+        # subject = f"MOD Preflight Error: {job_id}, level {level}"
+        # body = f"An error has occurred during preflight for https://notion.so/{job_id}.\n\nError message: {error_message}\n\nThis is an automated email being sent on behalf of Aria Corona, please do not reply. If you have any questions or concerns, please contact Aria directly at"
         logs = self.notion_helper.generate_property_body("Log", "rich_text", [error_message])
         if level == 1:
             tags = self.notion_helper.generate_property_body("Tags", "multi_select", ["DPI Changed", "OOS"]) # Change job tags here.
+            properties = {"Log": logs["Log"], "Tags": tags["Tags"]}
         elif level == 2:
             tags = self.notion_helper.generate_property_body("Tags", "multi_select", ["Resized", "OOS"]) # Change job tags here.
-            #self.automated_emails.send_email(self.email_config_path, subject, body)
-        if level >= 3:
+            properties = {"Log": logs["Log"], "Tags": tags["Tags"]}
+        elif level == -1:
+            tags = self.notion_helper.generate_property_body("Tags", "multi_select", ["Cropped", "OOS"])
+            properties = {"Log": logs["Log"], "Tags": tags["Tags"]}
+        elif level >= 3:
             system_status = self.notion_helper.generate_property_body("System status", "select", "Error")
-            #self.automated_emails.send_email(self.email_config_path, subject, body)
             if level == 3:
                 tags = self.notion_helper.generate_property_body("Tags", "multi_select", ["OOS"]) 
                 properties = {"Log": logs["Log"], "System status": system_status["System status"], "Tags": tags["Tags"]}
@@ -170,6 +217,7 @@ class HotfolderHandler(FileSystemEventHandler):
         else:
             properties = {"Log": logs["Log"]}
         print(f"Reporting error for job {job_id}: {error_message}\n{properties}")
+        logging.error(f"Error for job {job_id}: {error_message}")
         self.notion_helper.update_page(job_id, properties)
         pass
 
@@ -195,6 +243,9 @@ class HotfolderHandler(FileSystemEventHandler):
         results = self.notion_helper.get_page_property(order_id, r"iLNe") # Get related job IDs
         time.sleep(.5)
         order_results = self.notion_helper.get_page(order_id)
+
+        # Log the order cancellation
+        logging.info(f"Order {order_id} has been canceled. SKU: {sku}")
 
         order_number = 'Order_Number_Not_Found'
         if order_results['properties']['Order number']['rich_text']:
@@ -247,12 +298,15 @@ class HotfolderHandler(FileSystemEventHandler):
         If you have any questions, please contact customer support at ondemand@menoenterprises.com.
         """
         self.automated_emails.send_email(self.temp_config_path, subject, body)
+
+        # Record canceled order in file
+        with open(self.canceled_order_path, 'a') as file:
+            file.write(f"{order_id}\n")
+        self.canceled_orders.append(order_id)
         pass
 
 
     def process_new_file(self, file_path):
-        # Configure logging
-        logging.basicConfig(filename='hotfolder_handler.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
         # Log the file path
         logging.info(f"Processing new file: {file_path}")
@@ -315,7 +369,6 @@ class HotfolderHandler(FileSystemEventHandler):
 
         job_log = ""
         try:
-            print(job_output['properties']['Log']['rich_text'])
             if job_output['properties']['Log']['rich_text']: # Collecting Job Log
                 job_log = job_output['properties']['Log']['rich_text'][0]['plain_text'] + "\n"
         except Exception as e:
@@ -325,12 +378,18 @@ class HotfolderHandler(FileSystemEventHandler):
         try:    # @Aria: Assign job variables here.
             product_id = job_output['properties']['Product']['relation'][0]['id']
             customer = job_output['properties']['Customer']['formula']['string']
+            order_number = job_output['properties']['Order ID']['formula']['string']
         except Exception as e: 
             print(f"Could not find product ID or customer in job {job_id}. Skipping.")
             self.report_error(job_id, f"{job_log}{now} - Missing product or customer in Notion: {e}", 4)
             self.remove_file(file_path)
             return None
 
+        if order_number in self.canceled_orders:
+            print(f"Order {order_number} has been canceled. Skipping.")
+            self.remove_file(file_path)
+            return
+        
         try:    # Assigns preflight approval status for customer from JSON file
             allow_alter = self.customer_preflight_approval[customer]
         except KeyError:
@@ -360,6 +419,12 @@ class HotfolderHandler(FileSystemEventHandler):
 
         print(f"Product ID: {product_id}, xpix: {xpix}, ypix: {ypix}, hotfolder: {hotfolder}")
         size, dpi = self.get_image_info(file_path) # Get image size and DPI
+        if dpi == -1: # 
+            print(f"Error getting image info for {file_path}. Skipping.")
+            self.report_error(job_id, f"{job_log}{now} - Image file too large. Either an image issue (check this first) or the maximum image size needs to be increased in the preflighting script.", 4)
+            self.remove_file(file_path)
+            return None
+        
         print(f"Image size: {size}, DPI: {dpi}")
         # Determine which aspect ratio is closer to target aspect ratio.
         if abs(xpix - size[0]) + abs(ypix - size[1]) > abs(xpix - size[1]) + abs(ypix - size[0]): 
@@ -397,6 +462,11 @@ class HotfolderHandler(FileSystemEventHandler):
             self.report_error(job_id, f"{job_log}{now} - Image size {size} does not match target size ({xpix},{ypix}). Customer is on approved preflight list, resizing.", 2)
             self.remove_file(file_path) # Remove original file
             return None
+        elif(allow_alter == 2): # Image size does not match target size. Crop and move to hotfolder.
+            print(f"Image size does not match target size. Cropping and moving to {hotfolder}.")
+            image = Image.open(file_path)
+            self.crop_and_move(image, hotfolder, file_name, xpix, ypix, job_id, job_log)
+            self.report_error(job_id, f"{job_log}{now} - Image size {size} does not match target size ({xpix},{ypix}). Customer on the let it run list, cropping.", -1)
         else: # Image size does not match target size at 150DPI. Report error and trash file.
             print(f"Image size does not match target size. Trashing file.")
             self.report_error(job_id, f"{job_log}{now} - Image size does not match target size at 150DPI. Customer not on approved preflight list. Not sent to hotfolder.", 3)
