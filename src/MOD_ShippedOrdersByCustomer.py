@@ -34,14 +34,15 @@ job_content_filter = {
         ]}
     ]
 }
-# Shipped Date, Order Number, Jobs, Customer Name, ID, Status, Ship method, Shipment cost, Tracking, Pieces, Shipping ID, title
-order_filter_properties = [r"oKZj", r"E%5Bqx", r"iLNe", r"%7B%7BfG", r"qW%7D%5E", r"gS%5Cd", r"%60%7BTl", r"ppZT", r"~LUW", r"%60%5C%40d", r"%60%60Wq", r"title"] 
+# Shipped Date, Order Number, Jobs, Customer Name, ID, Status, Ship method, Shipment cost, Tracking, Pieces, Shipping ID, title, Customer
+order_filter_properties = [r"oKZj", r"E%5Bqx", r"iLNe", r"%7B%7BfG", r"qW%7D%5E", r"gS%5Cd", r"%60%7BTl", r"ppZT", r"~LUW", r"%60%5C%40d", r"%60%60Wq", r"title", r"iegJ"] 
 # Order ID, ID, Customer Name, Product ID, Product Description, Quantity, Job revenue, Title
 job_filter_properties = [r"Oe~K", r"nNsG", r"vruu", r"zUY%3F", r"%7CVjk", r"KQKT", r"LIf%7B", r"title"] 
 order_db_id = "d2747a287e974348870a636fbfa91e3e"
 job_db_id = "f11c954da24143acb6e2bf0254b64079"
 output_dict = {}
 first_party_output_dict = {}
+preflight_customer_perms = {}
 job_dict = {}
 customer_list = []
 output_key_list = [] # Shipped Orders
@@ -50,6 +51,7 @@ file_list_2 = [] # List of file paths for email attachments (First Party Orders)
 errored_jobs = []
 errored_orders = []
 order_id_list = []
+
 
 print("Querying Notion API for orders...")
 order_notion_response = notion_helper.query(order_db_id, order_filter_properties, order_content_filter)
@@ -97,9 +99,18 @@ for page in order_notion_response: # Iterating through Orders to find Shipped Or
         pieces = page["properties"]["Pieces"]["formula"]["number"]
         shipping_id = page["properties"]["Shipping ID"]["rich_text"][0]["plain_text"] if page["properties"]["Shipping ID"]["rich_text"] else ""
         full_order_number = page["properties"]["Order"]["title"][0]["plain_text"]
+        customer_notion_id = page["properties"]["Customer"]["relation"][0]["id"]
         if customer_name not in customer_list:
             customer_list.append(customer_name)
             print(f"New customer found: {customer_name}")
+            preflight_perms = notion_helper.get_page_property(customer_notion_id, r"I%3E%7Cy")
+            try:
+                customer_preflight_approval = preflight_perms['select']['name']
+                allow_alter = int(customer_preflight_approval[0])
+                preflight_customer_perms[customer_name] = allow_alter
+            except:
+                print(f"Error getting preflight approval for customer {customer_name}. Defaulting to 0.")
+                preflight_customer_perms[customer_name] = 0
         for id in jobs_relation_property:   # Iterating through Jobs in the Order
             job_page_id = id["id"]
             print(f"Processing job {job_page_id} for order {order_number}")
@@ -183,6 +194,10 @@ for customer in customer_list: # Creating a list of jobs for each customer.
                         output_dict[key][line_item]["Shipping Method"],
                         output_dict[key][line_item]["Tracking"]
                     ])
+        if preflight_customer_perms[customer] == 1:
+            csv_writer.writerow(["","","","PREFLIGHT_AUTOSIZE", "Preflighting Image Correction Fee", 1, "$75.00","",""])
+        if preflight_customer_perms[customer] == 2:
+            csv_writer.writerow(["","","","PREFLIGHT_CHECK", "Preflighting Image Check Fee", 1, "$49.00","",""])
     print(f"CSV written successfully as {csv_file_name}")
 
 csv_file_name = os.path.join(csv_directory, f"MOD_FirstPartyOrders_{datetime.now().strftime('%Y-%m-%d')}.csv")

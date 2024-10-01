@@ -103,19 +103,22 @@ for page in po_notion_response:
             output_dict[po_number] = {
                 "Job Description": job_description,
                 "CIC+Quant": cic_quant,
-                "PO Due Date": po_due_date,
                 "Total Item Quantity": total_item_quantity,
                 "Address": address,
-                "Ship-By Date": ship_by_date,
                 "Ship_Method": ship_method,
-                "Production Notes": production_notes
+                "Production Notes": production_notes,
+                "Ship-By Date": ship_by_date,                
+                "PO Due Date": po_due_date
             }
             print(f"Added PO: {po_number} to output_dict.")
             output_key_list.append(po_number)
             if po_number in prior_export:
                 for key in prior_export[po_number]:
                     if output_dict[po_number][key] != prior_export[po_number][key]:
-                        output_dict[po_number][key] = f"*{output_dict[po_number][key]}"
+                        if key is not "Ship-By Date" or key is not "PO Due Date":
+                            output_dict[po_number][key] = f"*{output_dict[po_number][key]}"
+                        else:
+                            output_dict[po_number]["Production Notes"] = f"*Dates have changed.\n{output_dict[po_number]['Production Notes']}"
                         print(f"Change detected in {po_number} for {key}.")
             else:
                 print(f"New PO: {po_number} added to output_dict.")

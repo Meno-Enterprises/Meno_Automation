@@ -55,10 +55,14 @@ class HotfolderHandler(FileSystemEventHandler):
         self.email_address_pattern = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
         self.accepted_extensions = ['jpg', 'jpeg', 'png']
         path = Path(r'conf/CustomerPreflightApproval.json')
-        with open(path, 'r') as file:
-            self.customer_preflight_approval = json.load(file)
+        
+        # with open(path, 'r') as file:
+        #     self.customer_preflight_approval = json.load(file)
+        
         with open(self.canceled_order_path, 'r') as file:
             self.canceled_orders = file.readlines()
+            
+        
 
         logging.basicConfig(filename='logs/hotfolder_handler.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -194,6 +198,7 @@ class HotfolderHandler(FileSystemEventHandler):
         pass
 
     def report_error(self, job_id, error_message, level = 0): # level 0: update note only, level 1: DPI Change, lvevl 2: Resize, level 3: stop job, level 4: job/product info related or critical error.
+        print(f"Start Reporting error for job {job_id}: {error_message}")
         properties = {}
         # subject = f"MOD Preflight Error: {job_id}, level {level}"
         # body = f"An error has occurred during preflight for https://notion.so/{job_id}.\n\nError message: {error_message}\n\nThis is an automated email being sent on behalf of Aria Corona, please do not reply. If you have any questions or concerns, please contact Aria directly at"
@@ -216,7 +221,7 @@ class HotfolderHandler(FileSystemEventHandler):
                 properties = {"Log": logs["Log"], "System status": system_status["System status"]}
         else:
             properties = {"Log": logs["Log"]}
-        print(f"Reporting error for job {job_id}: {error_message}\n{properties}")
+        print(f"End Reporting error for job {job_id}: {error_message}")
         logging.error(f"Error for job {job_id}: {error_message}")
         self.notion_helper.update_page(job_id, properties)
         pass
@@ -243,32 +248,46 @@ class HotfolderHandler(FileSystemEventHandler):
         results = self.notion_helper.get_page_property(order_id, r"iLNe") # Get related job IDs
         time.sleep(.5)
         order_results = self.notion_helper.get_page(order_id)
-
-        # Log the order cancellation
         logging.info(f"Order {order_id} has been canceled. SKU: {sku}")
 
         order_number = 'Order_Number_Not_Found'
         if order_results['properties']['Order number']['rich_text']:
             order_number = order_results['properties']['Order number']['rich_text'][0]['plain_text']
 
-        # Get customer emails
+        # Get customer id
         try:
             customer_id = order_results['properties']['Customer']['relation'][0]['id']
         except Exception as e:
             self.report_error(order_id, f"Order Canceled. Error finding customer ID in order {order_id}: {e}", 4)
             return
         time.sleep(.5)
-        customer_email_response = self.notion_helper.get_page_property(customer_id, r"qfs~")
-        customer_email_string = customer_email_response['email']
+        
+        # Get customer email
+        customer_email_response = self.notion_helper.get_page_property(customer_id, r"jtAR")
+        try:
+            customer_email_string = customer_email_response['results'][0]['rich_text']['plain_text']
+        except Exception as e:
+            try:
+                customer_email_response = self.notion_helper.get_page_property(customer_id, r"qfs~")
+                customer_email_string = customer_email_response['email']
+            except Exception as e:
+                logging.error(f"Error finding customer email in order {order_id}: {e}")
+                self.report_error(order_id, f"Order Canceled. Error finding customer email in order {order_id}: {e}", 4)
+                return
+            
         customer_email_list = re.findall(self.email_address_pattern, customer_email_string)
 
         # Process related job IDs, cancel jobs, and add to canceled job list.
-        if results:
-            if results['results']:
-                if results['results']['relation']:
-                    for id in results['results']['relation']:
+        try:
+            if results:
+                if results['results']:
+                    for each in results['results']:
+                        id = each['relation']['id']
                         canceled_job_list.append(id)
                         self.notion_helper.update_page(id, canceled_job_prop)
+        except Exception as e:
+            logging.error(f"Error canceling jobs for order {order_id}: {e}")
+            self.report_error(order_id, f"Order Canceled. Error canceling jobs for order {order_id}: {e}", 4)
         if len(canceled_job_list) == 0:
             print(f"No jobs found for order {order_id}.")
             error_prop = self.notion_helper.generate_property_body("System status", "select", "Error")
@@ -305,19 +324,19 @@ class HotfolderHandler(FileSystemEventHandler):
         self.canceled_orders.append(order_id)
         pass
 
-
     def process_new_file(self, file_path):
 
         # Log the file path
         logging.info(f"Processing new file: {file_path}")
         if ".~#~" in file_path:  
             print(f"File {file_path} is a temporary file. Waiting.")
+            old_path = file_path
             file_path = file_path.replace(".~#~", "")
-            time.sleep(5)
+            time.sleep(1)
             if os.path.exists(file_path) == False:
-                print(f"File took too long to copy, skipping.")
+                self.process_new_file(old_path)
                 return None
-        time.sleep(5) # Wait for file to finish copying
+        # time.sleep(5) # Wait for file to finish copying
         allow_alter = 0
         now = time.strftime('%Y-%m-%d %H:%M:%S')
         print(f"{now} - Processing file: {file_path}")
@@ -340,6 +359,7 @@ class HotfolderHandler(FileSystemEventHandler):
                 return None
         except AttributeError:
             print(f"Could not find database ID or image extension in {file_name}. Skipping.")
+            logging.error(f"Could not find database ID or image extension in {file_name}. Skipping.")
             return None        
        
         # Check if file is a reprint, sends it straight to a hotfolder.
@@ -359,6 +379,7 @@ class HotfolderHandler(FileSystemEventHandler):
             except Exception as e:
                 print(f"Missing info for reprint {job_id} in Notion. Skipping.")
                 self.report_error(job_id, f"{job_log}{now} - Missing reprint info in Notion: {e}", 4)
+                logging.error(f"Missing info for reprint {job_id} in Notion. Skipping.")
                 return None
             self.move_to_hotfolder(hotfolder, file_name)
             return None
@@ -373,13 +394,15 @@ class HotfolderHandler(FileSystemEventHandler):
                 job_log = job_output['properties']['Log']['rich_text'][0]['plain_text'] + "\n"
         except Exception as e:
             print(f"Error collecting job log: {e}")
+            logging.error(f"Error collecting job log: {e}")
             self.report_error(job_id, f"{job_log}{now} - Error collecting job log: {e}. Critical Error, please notify Aria.", 4)
 
         try:    # @Aria: Assign job variables here.
             product_id = job_output['properties']['Product']['relation'][0]['id']
-            customer = job_output['properties']['Customer']['formula']['string']
             order_number = job_output['properties']['Order ID']['formula']['string']
+            order_id = job_output['properties']['Order']['relation'][0]['id']
         except Exception as e: 
+            logging.error(f"Could not find product ID or customer in job {job_id}. Skipping.")
             print(f"Could not find product ID or customer in job {job_id}. Skipping.")
             self.report_error(job_id, f"{job_log}{now} - Missing product or customer in Notion: {e}", 4)
             self.remove_file(file_path)
@@ -390,13 +413,42 @@ class HotfolderHandler(FileSystemEventHandler):
             self.remove_file(file_path)
             return
         
+        print(f"Getting customer ID.")
+        customer_id_response = self.notion_helper.get_page_property(order_id, r"iegJ")
+        try:
+            customer_id = customer_id_response['results'][0]['relation']['id']
+        except Exception as e:
+            print(f"Error finding customer ID in order {order_id}: {e}")
+            logging.error(f"Error finding customer ID in order {order_id}: {e}")
+            self.report_error(job_id, f"{job_log}{now} - Error finding customer ID in order {order_id}: {e}", 4)
+            self.remove_file(file_path)
+            return None
+        
+        print(f"Getting customer preflight information.")
+        customer_preflight_approval = self.notion_helper.get_page_property(customer_id, r"I%3E%7Cy")
+        
+        try:
+            customer_preflight_approval = customer_preflight_approval['select']['name']
+            print(customer_preflight_approval)
+            allow_alter = int(customer_preflight_approval[0])
+            print(f"Customer {customer_id}:{allow_alter}")
+        except Exception as e:
+            print(f"Error finding customer preflight approval status: {e}")
+            logging.error(f"Error finding customer preflight approval status: {e}")
+            self.report_error(job_id, f"{job_log}{now} - Error finding customer preflight approval status: {e}", 4)
+            self.remove_file(file_path)
+            return None
+        
+        '''
         try:    # Assigns preflight approval status for customer from JSON file
             allow_alter = self.customer_preflight_approval[customer]
         except KeyError:
             print(f"Customer {customer} not found in preflight approval list. Skipping.")
+            logging.error(f"Customer {customer} not found in preflight approval list. Skipping.")
             self.report_error(job_id, f"{job_log}{now} - Customer not found in preflight approval list.", 4)
             self.remove_file(file_path)
             return None
+        '''
 
         product_output = self.notion_helper.get_page(product_id) # Get product information from Notion
 
@@ -407,12 +459,14 @@ class HotfolderHandler(FileSystemEventHandler):
             sku = product_output['properties']['Product Code']['title'][0]['plain_text']
         except Exception as e:
             print(f"Missing info for {product_id} in Notion. Skipping. {e}")
+            logging.error(f"Missing info for {product_id} in Notion. Skipping. {e}")
             self.report_error(job_id, f"{job_log}{now} - Missing product info in Notion: {e}", 4)
             self.remove_file(file_path)
             return None
         
-        if xpix == None or ypix == None or hotfolder == None: 
+        if xpix == None or ypix == None or hotfolder == None: # Check if product info is missing in Notion
             print(f"Missing product info for {product_id} in Notion. Skipping.")
+            logging.error(f"Missing product info for {product_id} in Notion. Skipping.")
             self.report_error(job_id, f"{job_log}{now} - Missing product info in Notion.", 4)
             self.remove_file(file_path)
             return None
@@ -421,6 +475,7 @@ class HotfolderHandler(FileSystemEventHandler):
         size, dpi = self.get_image_info(file_path) # Get image size and DPI
         if dpi == -1: # 
             print(f"Error getting image info for {file_path}. Skipping.")
+            logging.error(f"Error getting image info for {file_path}. Skipping.")
             self.report_error(job_id, f"{job_log}{now} - Image file too large. Either an image issue (check this first) or the maximum image size needs to be increased in the preflighting script.", 4)
             self.remove_file(file_path)
             return None
@@ -437,6 +492,7 @@ class HotfolderHandler(FileSystemEventHandler):
         # Check if image aspect ratio is within 5% of target aspect ratio. If not, trash the file and report the error.
         if image_aspect <= target_aspect * 0.95 or image_aspect >= target_aspect * 1.05: 
             print(f"Image aspect ratio is outsize acceptable fixable range. Reporting and trashing file.")
+            logging.error(f"Image aspect ratio is outside acceptable fixable range.")
             self.report_error(job_id, f"{job_log}{now} - Image aspect ratio is outside acceptable fixable range.", 3)
             self.remove_file(file_path)
             return None
@@ -462,14 +518,15 @@ class HotfolderHandler(FileSystemEventHandler):
             self.report_error(job_id, f"{job_log}{now} - Image size {size} does not match target size ({xpix},{ypix}). Customer is on approved preflight list, resizing.", 2)
             self.remove_file(file_path) # Remove original file
             return None
-        elif(allow_alter == 2): # Image size does not match target size. Crop and move to hotfolder.
+        elif(allow_alter == 3): # Image size does not match target size. Crop and move to hotfolder.
             print(f"Image size does not match target size. Cropping and moving to {hotfolder}.")
             image = Image.open(file_path)
             self.crop_and_move(image, hotfolder, file_name, xpix, ypix, job_id, job_log)
             self.report_error(job_id, f"{job_log}{now} - Image size {size} does not match target size ({xpix},{ypix}). Customer on the let it run list, cropping.", -1)
-        else: # Image size does not match target size at 150DPI. Report error and trash file.
+        else: # Image size does not match target size at 150DPI. Cancel order and trash file.
             print(f"Image size does not match target size. Trashing file.")
-            self.report_error(job_id, f"{job_log}{now} - Image size does not match target size at 150DPI. Customer not on approved preflight list. Not sent to hotfolder.", 3)
+            logging.info(f"Image size does not match target size. Cancelling order.")
+            self.report_error(job_id, f"{job_log}{now} - Image size does not match target size at 150DPI. Customer not on approved preflight list. Canceling jobs and order.", 3)
             self.remove_file(file_path)
             if job_output['properties']['Order']['relation']:
                 order_id = job_output['properties']['Order']['relation'][0]['id']

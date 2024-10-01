@@ -43,7 +43,7 @@ query(string, list(opt.), dict(opt.),int(opt.)) -> dict
             If not specified, all pages will be retrieved.
 
     Returns:
-        dict: The "results" of the JSON response from the Notion API. This will cut out the pagination information, returning only the page data.
+        list of dictionary objects: The "results" of the JSON response from the Notion API. This will cut out the pagination information, returning only the page data.
 
 Additional information on content filters can be found at https://developers.notion.com/reference/post-database-query-filter#the-filter-object
 Additional information on Notion queries can be found at https://developers.notion.com/reference/post-database-query
@@ -285,8 +285,8 @@ class NotionApiHelper:
     def get_page_property(self, pageID, propID):
         try:
             time.sleep(0.5) # To avoid rate limiting
-            print(f"{self.endPoint}/pages/{pageID}/properies/{propID}")
-            response = requests.get(f"{self.endPoint}/pages/{pageID}/properies/{propID}", headers=self.headers)
+            print(f"{self.endPoint}/pages/{pageID}/properties/{propID}")
+            response = requests.get(f"{self.endPoint}/pages/{pageID}/properties/{propID}", headers=self.headers)
             response.raise_for_status()
             self.counter = 0
             return response.json()

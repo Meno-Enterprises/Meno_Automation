@@ -1,7 +1,7 @@
 from NotionApiHelper import NotionApiHelper
 import json
 
-page_id = "a4ed0c2ca9884af093e9ba08c8e49f40"
+page_id = "cc44b728898c4d3d952dce6fb5b15dba"
 properties_dict = {}
 notion_helper = NotionApiHelper()
 response = notion_helper.get_page(page_id)
