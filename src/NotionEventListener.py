@@ -84,8 +84,44 @@ class NotionEventListener:
             time.sleep(5)
             print("Database updated.")
             
-    def check_trigger(self, trigger, properties):
-        pass
+    def check_triggers(self, data, trigger_config):
+        def parse_trigger(config):
+            if 'and' in config:
+                return lambda item: all(parse_trigger(cond)(item) for cond in config['and'])
+            elif 'or' in config:
+                return lambda item: any(parse_trigger(cond)(item) for cond in config['or'])
+            else:
+                key, value = next(iter(config.items()))
+                if key == 'created':
+                    return lambda item: 'created' in item
+                elif key == 'property':
+                    return lambda item: item['properties'].get(value['property']) == value['select']['equals']
+
+
+        filter_func = parse_trigger(trigger_config)
+        return [item for item in data if filter_func(item)]
+
+    def check_change(self, db_id, active_properties):
+        last_query = self.load_storage(db_id)
+        
+        # Query DB
+        response = self.query_database(db_id)
+        if response is None or response == last_query:
+            return
+
+        filter_config = self.config.get('filter', {})
+        filtered_response = self.check_triggers(response, filter_config)
+
+        for page in filtered_response:
+            if any(item['id'] == page['id'] for item in last_query):
+                index = next((i for i, item in enumerate(last_query) if item['id'] == page['id']), None)
+                if index is not None:
+                    # Compare properties to detect changes
+                    for prop in active_properties:
+                        if page['properties'][prop] != last_query[index]['properties'][prop]:
+                            self.check_triggers(trigger, page['properties'])
+                            break
+                        
             
     def take_action(self, action, data = None):
         pass
@@ -126,24 +162,23 @@ class NotionEventListener:
         self.config['config'].append(dictionary)
         self.save_config()
 
-    # action = [(webhook, [urls]), (slack, [urls]), (email, [emails]), etc.] I want the scalability to add more actions later. You just have to build the trigger manually, good luck.
+   
     # Trigger construction mimicks the Notion filter structure. https://developers.notion.com/reference/post-database-query-filter#the-filter-object
-    def build_config_part(self, database_id, trigger, action = [("", [])]): 
-        action_part = {}
-        for each in action:
-            action_part[each[0]] = each[1]
+    def build_config_part(self, database_id, trigger, action = None,content_filter = None, properties_filter = None): 
         config_part = {
             "uid": str(uuid.uuid4()),
-            "database_id": database_id,
-            "action": action_part,
-            "trigger": trigger
+            "database_id": database_id, # String
+            "action": action, # Dictionary
+            "content_filter": content_filter, # Dictionary
+            "properties_filter": properties_filter, # List of Strings
+            "trigger": trigger # Dictionary
         }
         print(config_part)
         pass
 
-    def query_database(self, db_id):
+    def query_database(self, db_id, filter_properties = None, content_filter = None):
         print(f"Querying database {db_id}")
-        return self.notion_helper(db_id)
+        return self.notion_helper(db_id, filter_properties, content_filter)
     
     def store_previous_query(self, data, db_id):
         with open(os.path.join(self.storage_directory, f"{db_id}.json"), 'w') as file:
@@ -173,6 +208,23 @@ class NotionEventListener:
             }
             "trigger":{
                 "and": [
+                    "or": [
+                        {
+                            "property": "Status",
+                            "select": {
+                                "equals": "In Progress"
+                            }
+                        },
+                        {
+                            "property": "Priority",
+                            "select": {
+                                "equals": "High"
+                            }
+                        },
+                        {
+                            "created": {}
+                        }
+                        ],                    
                     {
                         "property": "Status",
                         "select": {
@@ -184,23 +236,6 @@ class NotionEventListener:
                         "select": {
                             "equals": "High"
                         }
-                    }
-                ],
-                "or": [
-                    {
-                        "property": "Status",
-                        "select": {
-                            "equals": "In Progress"
-                        }
-                    },
-                    {
-                        "property": "Priority",
-                        "select": {
-                            "equals": "High"
-                        }
-                    },
-                    {
-                        "created": {}
                     }
                 ]
                 }
