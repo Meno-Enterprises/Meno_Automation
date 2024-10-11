@@ -11,6 +11,16 @@
 Dependencies:
 - NotionApiHelper.py
 - AutomatedEmails.py
+
+Notion Database Property Dependencies:
+Job Database:
+- ID
+- Customer
+- Job status
+- Product Description
+- Reprint count
+- Quantity
+- Product ID
 '''
 
 from NotionApiHelper import NotionApiHelper
