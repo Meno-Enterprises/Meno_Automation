@@ -1,5 +1,30 @@
 #!/usr/bin/env python3
 
+'''
+Dependencies:
+- NotionApiHelper.py
+- AutomatedEmails.py
+- conf/RMS_Weekly_Order_Report_Email_Conf.json
+- conf/Aria_Email_Conf.json
+
+Notion Database Property Dependencies:
+- PO Database:
+    - PO #
+    - Job Description
+    - Customer
+    - CIC + Quantity
+    - PO Due Date
+    - Status
+    - Priority
+    - Total Item Quantity
+    - Address
+    - Invoiced Complete
+    - Ship-By Date
+    - Production Notes
+    - Ship Method
+'''
+
+
 from NotionApiHelper import NotionApiHelper
 from AutomatedEmails import AutomatedEmails
 from datetime import datetime

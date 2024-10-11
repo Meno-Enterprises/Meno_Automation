@@ -12,6 +12,31 @@ Dependencies:
 - NotionApiHelper
 - AutomatedEmails
 
+Database Dependencies:
+- MOD Jobs Database
+    - ID
+    - Customer Name
+    - Product ID
+    - Product Description
+    - Quantity
+    - Job Revenue
+    - Order ID
+    - Line Item
+- MOD Orders Database
+    - ID
+    - Shipped Date
+    - Order number
+    - Jobs
+    - Customer name
+    - Status
+    - Shipment cost
+    - Tracking
+    - Ship method
+    - Pieces
+    - Shipping ID
+    - title
+    - Customer
+
 This script generates a weekly report of shipped orders for Meno On-Demand. It queries the Notion API for shipped orders and their associated jobs,
 and generates a CSV file for each customer with the shipped orders for that week. It then sends an email to each customer with their CSV file as an attachment.
 Sets all jobs to "Invoiced" in Notion after generating the report.

@@ -20,6 +20,26 @@ Dependencies:
     pip install cronitor
     NotionApiHelper.py
     AutomatedEmails.py
+Property Dependencies:
+    MOD Jobs Database:
+        - Log
+        - Product
+        - Order ID
+        - Order
+        - Image source
+    MOD Products Database:
+        - xpix
+        - ypix
+        - Hot Folder
+        - Product Code
+    MOD Customers Database:
+        - Email Primary
+        - Email Backup
+        - Preflight Approval
+    MOD Orders Database:
+        - Order number
+        - Customer
+        - Job IDs
 
 Image correction logic:
     1. Check if file is an image.
@@ -91,7 +111,7 @@ class HotfolderHandler(FileSystemEventHandler):
             return None, -1
         return size, dpi
     
-    def adjust_dpi_and_move(self, image, hotfolder, file_name):
+    def adjust_dpi_and_move(self, image, hotfolder, file_name, job_id):
         print(f"Adjusting DPI to 150 and moving to {hotfolder}.")
         new_path = f"{self.HOTFOLDER_PATH}/{hotfolder}/{file_name}"
         if os.path.exists(new_path):
@@ -99,16 +119,11 @@ class HotfolderHandler(FileSystemEventHandler):
             self.remove_file(new_path)
             time.sleep(5) # Wait for Caldera to recognize the file is gone.        
         image.save(new_path, dpi=(150, 150)) # Force saves the image to 150 DPI. Doesn't actually do anything to the image, just changes the EXIF data
-        try:
-            shutil.copy(new_path, f"{self.HOTFOLDER_PATH}/tmp/{file_name}")
-        except Exception as e:
-            print(f"Error copying file to tmp folder: {e}")
-        pass
+        self.copy_image(job_id, f"{self.HOTFOLDER_PATH}/tmp/{file_name}", new_path)
     
     def resize_image(self, image, hotfolder, image_file_name, target_xpix, target_ypix, original_size, job_id, existing_job_log):
         try:
             print(f"Resizing image to {target_xpix},{target_ypix} and moving to {hotfolder}.")
-            hotfolder_path = f"{self.HOTFOLDER_PATH}/{hotfolder}/{image_file_name}"
             scale_factor_width = target_xpix / original_size[0]
             scale_factor_height = target_ypix / original_size[1]
             scale_factor = max(scale_factor_width, scale_factor_height)       
@@ -116,12 +131,6 @@ class HotfolderHandler(FileSystemEventHandler):
             print(f"Scaling image by {scale_factor}.")
             scaled_image = image.resize((int(original_size[0] * scale_factor), int(original_size[1] * scale_factor)), Image.LANCZOS) # Resize image to target size
 
-            if os.path.exists(hotfolder_path): # Check if file already exists in hotfolder
-                print(f"File {image_file_name} already exists in {hotfolder}. Removing old file.")
-                logging.info(f"File {image_file_name} already exists in {hotfolder}. Removing old file.")
-                self.remove_file(hotfolder_path)
-                time.sleep(5) # Wait for Caldera to recognize the file is gone.
-            
             # Crop the image and save it to the hotfolder.
             self.crop_and_move(scaled_image, hotfolder, image_file_name, target_xpix, target_ypix, job_id, existing_job_log)
 
@@ -144,19 +153,13 @@ class HotfolderHandler(FileSystemEventHandler):
             
             if left == 0 and top == 0 and right == image.size[0] and bottom == image.size[1]:
                 print(f"Image does not need to be cropped. Saving to {hotfolder}.")
-                self.save_image(job_id, image, f"{self.HOTFOLDER_PATH}/tmp/{file_name}", icc_profile)
+                self.save_image(job_id, image, f"{self.HOTFOLDER_PATH}/{hotfolder}/{file_name}", icc_profile)
                 self.copy_image(job_id, f"{self.HOTFOLDER_PATH}/tmp/{file_name}", f"{self.HOTFOLDER_PATH}/{hotfolder}/{file_name}")
                 
             else:
                 print(f"Image needs to be cropped. Cropping to {target_xpix},{target_ypix}.")
                 cropped_image = image.crop((int(left), int(top), int(right), int(bottom)))
                 new_path = f"{self.HOTFOLDER_PATH}/{hotfolder}/{file_name}"
-                
-                if os.path.exists(new_path):
-                    print(f"File {file_name} already exists in {hotfolder}. Removing old file.")
-                    self.remove_file(new_path)
-                    time.sleep(5)
-                
                 self.save_image(job_id, cropped_image, new_path, icc_profile)
                 print(f"Corrected {file_name} image to {target_xpix},{target_ypix} and moved to {hotfolder}.")
                 self.copy_image(job_id, f"{self.HOTFOLDER_PATH}/tmp/{file_name}", new_path)
@@ -179,10 +182,13 @@ class HotfolderHandler(FileSystemEventHandler):
         pass
 
     def save_image(self, job_id, image, path, icc_profile = None):
+        if os.path.exists(path):
+                    print(f"File already exists in {path}. Removing old file.")
+                    self.remove_file(path)
+                    time.sleep(5)
         try:
             if icc_profile:
                 image.save(path, dpi=(150, 150), icc_profile=icc_profile)
-                
             else:
                 image.save(path, dpi=(150, 150))
                 
@@ -539,7 +545,7 @@ class HotfolderHandler(FileSystemEventHandler):
             if(dpi != (150, 150)): # Correct Size, but DPI is wrong. Adjust DPI and move to hotfolder.
                 print(f"Image size matches target size, but DPI does not. Adjusting DPI to 150 and moving to {hotfolder}.")
                 image = self.open_image(file_path)
-                self.adjust_dpi_and_move(image, hotfolder, file_name)
+                self.adjust_dpi_and_move(image, hotfolder, file_name, job_id)
                 self.report_error(job_id, f"{job_log}{now} - Image DPI {dpi} does not match target DPI. Adjusting to 150 DPI and moving to hotfolder.", 1)            
                 self.remove_file(file_path) # Remove original file
                 return None
@@ -608,6 +614,8 @@ if __name__ == "__main__":
             time.sleep(1)
             
             if tick % PING_CYCLE == 0:
+                now = time.strftime('%Y-%m-%d %H:%M:%S')
+                print(f"{now} - pong")
                 MONITOR.ping()
                 
             if tick % GC_CYCLE == 0:

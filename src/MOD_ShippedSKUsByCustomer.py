@@ -7,6 +7,23 @@ Dependencies:
 - NotionApiHelper.py
 - AutomatedEmails.py
 - conf/MOD_ShippedSKUsByCustomer_Email_Conf.json
+
+Notion Database Property Dependencies:
+- Orders Database:
+    - ID
+    - Shipped Date
+    - Order Number
+    - Jobs
+    - Customer Name
+    - Status
+- Jobs Database:
+    - Order ID
+    - ID
+    - Customer Name
+    - Product ID
+    - Product Description
+    - Quantity
+    - Job Revenue
 '''
 
 from NotionApiHelper import NotionApiHelper
