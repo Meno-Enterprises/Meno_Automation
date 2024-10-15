@@ -12,11 +12,23 @@ dependancies:
 from NotionApiHelper import NotionApiHelper
 from AutomatedEmails import AutomatedEmails
 from deepdiff import DeepDiff
-import time, os, requests, uuid
+import time, os, requests, uuid, cronitor, gc
 import logging
 import json
 from datetime import datetime, timedelta
 
+CRONITOR_KEY_PATH = "conf/Cronitor_API_Key.txt"
+with open(CRONITOR_KEY_PATH, "r") as file:
+    cronitor_api_key = file.read()
+        
+cronitor.api_key = cronitor_api_key
+MONITOR = cronitor.Monitor("Notion Event Listener")
+gc.enable()
+SLEEP_TIMER = 5 # Seconds
+PING_CYCLE = 100 # Number of loops before pinging cronitor.
+GC_CYCLE = 500 # Number of loops before running garbage collection.
+CONFIG_RELOAD_CYCLE = 100 # Number of loops before reloading the config file.
+STOP_CYCLE = 10000 # Number of loops before stopping the script.
 class NotionEventListener:
     def __init__(self):
         self.notion_helper = NotionApiHelper()
@@ -25,11 +37,13 @@ class NotionEventListener:
         self.logger = logging.getLogger(__name__)
         self.STORAGE_DIRECTORY = "storage"
         self.CONFIG_PATH = "conf/NotionEventListener_Conf.json"
+        self.EMAIL_ME_PATH = "conf/Aria_Email_Conf.json"
         self.query_lookback_time = 45 # Minutes, How far back to look for changes on initial start.
-        self.QUERY_LOOKBACK_PADDING = 10 # Minutes, Padding on how far back to look for changes on subsequent queries.
+        self.QUERY_LOOKBACK_PADDING = 5 # Minutes, Padding on how far back to look for changes on subsequent queries.
         self.QUERY_LOOKBACK = (datetime.now() - timedelta(minutes=self.query_lookback_time)).strftime('%Y-%m-%dT%H:%M:%S')
         self.query_filter = {"timestamp": "last_edited_time", "last_edited_time": {"on_or_after": self.QUERY_LOOKBACK}} # Default query filter. Overrided by config.
         self.config = {}
+        self.first_run = True
     
         os.makedirs(self.STORAGE_DIRECTORY, exist_ok=True)
         
@@ -66,7 +80,7 @@ class NotionEventListener:
                 content_filter = self.query_filter
             
             # Load previous query
-            if not self.storage_exists(db_id): # Storage does not exist, create it.
+            if not self.storage_exists(db_id) or self.first_run: # Storage does not exist, create it.
                 self.save_storage(db_id, self.query_database(db_id, filter_properties, content_filter))
                 continue
             
@@ -113,6 +127,7 @@ class NotionEventListener:
             print("Database updated.")
             
         self.query_lookback_time = (datetime.now() - start_time).total_seconds() / 60 + 10
+        self.first_run = False
             
     def get_active_properties(self, db_id): # Returns a unique list of DB properties based off the config files for a given DB.
         active_properties = []
@@ -156,11 +171,111 @@ class NotionEventListener:
                     return False         
             
             elif 'property' in config:
-                if "property changed" in data:
+                
+                if "property changed" in data: # This is a mitigable disaster that I somehow overlooked, I'll throw it into a function later.
+                    
                     for property in data['property changed']['new property']:
+                        
                         if property == config['property']:
-                            prop_type = data['property changed']['new property'][property]['type']
-                            return self.trigger_compare(data['property changed']['new property'][property][prop_type], config[prop_type])
+                            try:
+                                prop_type = data['property changed']['new property'][property]['type']
+                                package = data['property changed']['new property'][property][prop_type]
+                                
+                                # Select, Number, Formula (String), rich_text, relation
+                                
+                                if prop_type == "select" or prop_type == "status":
+                                    package = data['property changed']['new property'][property][prop_type]["name"]
+                                    
+                                if prop_type == "formula":
+                                    form_type = data['property changed']['new property'][property][prop_type]["type"]
+                                    try:
+                                        if form_type == "date": # This might break, I'm not sure if the date format is the same as the date format in the config.
+                                            package = data['property changed']['new property'][property][prop_type]["date"]["start"]
+                                        else:
+                                            package = data['property changed']['new property'][property][prop_type][form_type]
+                                    except KeyError:
+                                        package = data['property changed']['new property'][property][prop_type][form_type]
+                                    
+                                if prop_type == "rich_text" or prop_type == "title":
+                                    text_list = []
+                                    
+                                    for text in data['property changed']['new property'][property][prop_type]:
+                                        text_list.append(text['plain_text'])
+                                        
+                                    package = ", ".join(text_list)
+                                    
+                                if prop_type == "relation":
+                                    package = []
+                                    
+                                    if "has_more" in data['property changed']['new property'][property]: # If there are more than 25 relations, replace data with full data (up to 100).
+                                        response = self.notion_helper.get_page_property(data, data['property changed']['new property'][property]['id'])
+                                        data['property changed']['new property'][property][prop_type] = response[prop_type]
+                                    
+                                    for id in data['property changed']['new property'][property][prop_type]:
+                                        package.append(id['id'])
+                                        
+                                if prop_type == "date":
+                                    package = data['property changed']['new property'][property][prop_type]['start']
+                                    
+                                if prop_type == "files":
+                                    package = []
+                                    
+                                    for file in data['property changed']['new property'][property][prop_type]:
+                                        package.append(file['external']['url'])
+                                
+                                if prop_type == "last_edited_by":
+                                    package = data['property changed']['new property'][property][prop_type]['id']
+                                
+                                if prop_type == "multi_select":
+                                    package = []
+                                    
+                                    for select in data['property changed']['new property'][property][prop_type]:
+                                        package.append(select['name'])
+                                        
+                                if prop_type == "rollup":
+                                    if data['property changed']['new property'][property][prop_type]['type'] == "number":
+                                        package = data['property changed']['new property'][property][prop_type]['number']
+                                        
+                                    elif data['property changed']['new property'][property][prop_type]['type'] == "date":
+                                        package = data['property changed']['new property'][property][prop_type]['date']['start']
+                                        
+                                    else: # This is an array of possibilities.
+                                        if "any" in config[prop_type]:
+                                            return_list = []
+                                            
+                                            for each in data['property changed']['new property'][property][prop_type]['array']:
+                                                new_data = {"property changed": {"new property": {property: each}}}
+                                                return_list.append(parse_trigger(new_data, config[prop_type]['any']))     
+                                                
+                                            return any(return_list)
+                                        
+                                        elif "every" in config[prop_type]:
+                                            return_list = []
+                                            
+                                            for each in data['property changed']['new property'][property][prop_type]['array']:
+                                                new_data = {"property changed": {"new property": {property: each}}}
+                                                return_list.append(parse_trigger(new_data, config[prop_type]['every']))
+                                                
+                                            return all(return_list)
+                                        
+                                        elif "none" in config[prop_type]:
+                                            return_list = []
+                                            
+                                            for each in data['property changed']['new property'][property][prop_type]['array']:
+                                                new_data = {"property changed": {"new property": {property: each}}}
+                                                return_list.append(parse_trigger(new_data, config[prop_type]['none']))
+                                                
+                                            return not any(return_list)
+                                        
+                                        else:
+                                            return False
+                                    
+                            except Exception as e:
+                                self.logger.error(f"Something in check_triggers failed: {property}\n{e}")
+                                self.automated_emails.send_email(self.EMAIL_ME_PATH, "NotionEventListener:Error in check_triggers", f"Error in check_triggers: {property}\n{e}")
+                                return False
+                            
+                            return self.trigger_compare(package, config[prop_type])
                         
                 else:
                     return False
@@ -232,15 +347,6 @@ class NotionEventListener:
         
         elif 'greater_than_or_equal_to' in config:
             return new_property >= config['greater_than_or_equal_to']
-        
-        elif 'any' in config:
-            return any(self.trigger_compare(new_property, each) for each in config['any'])
-        
-        elif 'every' in config:
-            return all(self.trigger_compare(new_property, each) for each in config['every'])
-        
-        elif 'none' in config:
-            return not any(self.trigger_compare(new_property, each) for each in config['none'])
         
         elif 'after' in config:
             new_property, config['after'] = date_convert(new_property, config['after'])
@@ -340,14 +446,21 @@ class NotionEventListener:
         Returns:
             dict: Data formatted as:
             {
-                page_id: {
+                "11f07f31a45e80c1bd54d5560360f4ca": {
+                    "new page": "11f07f31a45e80c1bd54d5560360f4ca",
                     "property changed": {
-                        "old property": {{property: value}, {property: {}}},
-                        "new property": {{property: value}, {property: value}}
-                    },
-                    "new page": page_id,
+                        "old property": {
+                            "property1": "value1",
+                            "property2": null
+                            },
+                        "new property": {
+                            "property1": "newvalue1",
+                            "property2": "newvalue2"
+                            }
+                    }
                 }
             }
+
         """
         old_dictionary = {}
         new_dictionary = {}
@@ -494,12 +607,22 @@ class NotionEventListener:
 if __name__ == "__main__":
     listener = NotionEventListener()
     counter = 0 # Tracking number of loops to trigger different events. ie. refreshing config, pinging monitoring service, clean memory, etc.
+    
     listener.load_config()
+    MONITOR.ping(state='run')
 
+    onoff = True
     try:
-        while True:
+        while onoff:
             counter += 1    
             listener.listen()
-            time.sleep(5)
+            time.sleep(SLEEP_TIMER)
+            if counter % PING_CYCLE == 0:
+                MONITOR.ping()
+            if counter % GC_CYCLE == 0:
+                gc.collect()
+            if counter % CONFIG_RELOAD_CYCLE == 0:
+                listener.load_config()
     except KeyboardInterrupt:
+        MONITOR.ping(state='complete')
         pass
