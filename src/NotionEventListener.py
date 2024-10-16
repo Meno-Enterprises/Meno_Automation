@@ -24,7 +24,7 @@ with open(CRONITOR_KEY_PATH, "r") as file:
 cronitor.api_key = cronitor_api_key
 MONITOR = cronitor.Monitor("Notion Event Listener")
 gc.enable()
-SLEEP_TIMER = 5 # Seconds
+SLEEP_TIMER = 30 # Seconds
 PING_CYCLE = 100 # Number of loops before pinging cronitor.
 GC_CYCLE = 500 # Number of loops before running garbage collection.
 CONFIG_RELOAD_CYCLE = 100 # Number of loops before reloading the config file.
@@ -154,219 +154,158 @@ class NotionEventListener:
             
         return active_properties
             
-            
-    def check_triggers(self, data, trigger_config): # Returns true if the trigger condition is met.       
-        def parse_trigger(data, config):
-            if 'and' in config:
-                return all(parse_trigger(data, each) for each in config['and'])
-            
-            elif 'or' in config:
-                return any(parse_trigger(data, each) for each in config['or'])
-            
-            elif 'created' in config:
-                if 'new page' in data:
-                    return True
-                
+    def check_triggers(self, data, config):
+        def is_selstat(data, property, prop_type):
+            return data['property changed']['new property'][property][prop_type]["name"]
+        
+        def is_formula(data, property, prop_type):
+            form_type = data['property changed']['new property'][property][prop_type]["type"]
+            try:
+                if form_type == "date": # This might break, I'm not sure if the date format is the same as the date format in the config.
+                    return data['property changed']['new property'][property][prop_type]["date"]["start"]
                 else:
-                    return False         
+                    return data['property changed']['new property'][property][prop_type][form_type]
+            except KeyError: # jk, this'll probably work if it did break.
+                return data['property changed']['new property'][property][prop_type][form_type]        
+        
+        def is_rich_text(data, property, prop_type):
+            text_list = []
+            for text in data['property changed']['new property'][property][prop_type]:
+                text_list.append(text['plain_text'])
+            return ", ".join(text_list)
+        
+        def is_relation(data, property, prop_type):
+            package = []
+                                
+            if "has_more" in data['property changed']['new property'][property]: # If there are more than 25 relations, replace data with full data (up to 100).
+                response = self.notion_helper.get_page_property(data, data['property changed']['new property'][property]['id'])
+                data['property changed']['new property'][property][prop_type] = response[prop_type]
             
-            elif 'property' in config:
-                
-                if "property changed" in data: # This is a mitigable disaster that I somehow overlooked, I'll throw it into a function later.
-                    
-                    for property in data['property changed']['new property']:
-                        
-                        if property == config['property']:
-                            try:
-                                prop_type = data['property changed']['new property'][property]['type']
-                                package = data['property changed']['new property'][property][prop_type]
-                                
-                                # Select, Number, Formula (String), rich_text, relation
-                                
-                                if prop_type == "select" or prop_type == "status":
-                                    package = data['property changed']['new property'][property][prop_type]["name"]
-                                    
-                                if prop_type == "formula":
-                                    form_type = data['property changed']['new property'][property][prop_type]["type"]
-                                    try:
-                                        if form_type == "date": # This might break, I'm not sure if the date format is the same as the date format in the config.
-                                            package = data['property changed']['new property'][property][prop_type]["date"]["start"]
-                                        else:
-                                            package = data['property changed']['new property'][property][prop_type][form_type]
-                                    except KeyError:
-                                        package = data['property changed']['new property'][property][prop_type][form_type]
-                                    
-                                if prop_type == "rich_text" or prop_type == "title":
-                                    text_list = []
-                                    
-                                    for text in data['property changed']['new property'][property][prop_type]:
-                                        text_list.append(text['plain_text'])
-                                        
-                                    package = ", ".join(text_list)
-                                    
-                                if prop_type == "relation":
-                                    package = []
-                                    
-                                    if "has_more" in data['property changed']['new property'][property]: # If there are more than 25 relations, replace data with full data (up to 100).
-                                        response = self.notion_helper.get_page_property(data, data['property changed']['new property'][property]['id'])
-                                        data['property changed']['new property'][property][prop_type] = response[prop_type]
-                                    
-                                    for id in data['property changed']['new property'][property][prop_type]:
-                                        package.append(id['id'])
-                                        
-                                if prop_type == "date":
-                                    package = data['property changed']['new property'][property][prop_type]['start']
-                                    
-                                if prop_type == "files":
-                                    package = []
-                                    
-                                    for file in data['property changed']['new property'][property][prop_type]:
-                                        package.append(file['external']['url'])
-                                
-                                if prop_type == "last_edited_by":
-                                    package = data['property changed']['new property'][property][prop_type]['id']
-                                
-                                if prop_type == "multi_select":
-                                    package = []
-                                    
-                                    for select in data['property changed']['new property'][property][prop_type]:
-                                        package.append(select['name'])
-                                        
-                                if prop_type == "rollup":
-                                    if data['property changed']['new property'][property][prop_type]['type'] == "number":
-                                        package = data['property changed']['new property'][property][prop_type]['number']
-                                        
-                                    elif data['property changed']['new property'][property][prop_type]['type'] == "date":
-                                        package = data['property changed']['new property'][property][prop_type]['date']['start']
-                                        
-                                    else: # This is an array of possibilities.
-                                        if "any" in config[prop_type]:
-                                            return_list = []
-                                            
-                                            for each in data['property changed']['new property'][property][prop_type]['array']:
-                                                new_data = {"property changed": {"new property": {property: each}}}
-                                                return_list.append(parse_trigger(new_data, config[prop_type]['any']))     
-                                                
-                                            return any(return_list)
-                                        
-                                        elif "every" in config[prop_type]:
-                                            return_list = []
-                                            
-                                            for each in data['property changed']['new property'][property][prop_type]['array']:
-                                                new_data = {"property changed": {"new property": {property: each}}}
-                                                return_list.append(parse_trigger(new_data, config[prop_type]['every']))
-                                                
-                                            return all(return_list)
-                                        
-                                        elif "none" in config[prop_type]:
-                                            return_list = []
-                                            
-                                            for each in data['property changed']['new property'][property][prop_type]['array']:
-                                                new_data = {"property changed": {"new property": {property: each}}}
-                                                return_list.append(parse_trigger(new_data, config[prop_type]['none']))
-                                                
-                                            return not any(return_list)
-                                        
-                                        else:
-                                            return False
-                                    
-                            except Exception as e:
-                                self.logger.error(f"Something in check_triggers failed: {property}\n{e}")
-                                self.automated_emails.send_email(self.EMAIL_ME_PATH, "NotionEventListener:Error in check_triggers", f"Error in check_triggers: {property}\n{e}")
-                                return False
-                            
-                            return self.trigger_compare(package, config[prop_type])
-                        
+            for id in data['property changed']['new property'][property][prop_type]:
+                package.append(id['id'])
+        
+        def is_date(data, property, prop_type):
+            return data['property changed']['new property'][property][prop_type]['start']
+        
+        def is_files(data, property, prop_type):
+            package = []
+            for file in data['property changed']['new property'][property][prop_type]:
+                package.append(file['external']['url'])
+            return package
+        
+        def is_last_edited_by(data, property, prop_type):
+            return data['property changed']['new property'][property][prop_type]['id']
+        
+        def is_multi_select(data, property, prop_type):
+            package = []
+            for select in data['property changed']['new property'][property][prop_type]:
+                package.append(select['name'])
+            return package
+        
+        def is_rollup(data, property, prop_type): # rollups are a special snowflake.
+            if data['property changed']['new property'][property][prop_type]['type'] == "number":
+                return self.trigger_compare(data['property changed']['new property'][property][prop_type]['number'], config[prop_type])
+            elif data['property changed']['new property'][property][prop_type]['type'] == "date":
+                return self.trigger_compare(data['property changed']['new property'][property][prop_type]['date']['start'], config[prop_type])
+            else: # This is an array of possibilities. I'm not supporting the other formats.
+                return_list = []
+                # Itterate through each rollup, repackage the data as a single property and rerun the parse on each.
+                for each in data['property changed']['new property'][property][prop_type]['array']:
+                    new_data = {"property changed": {"new property": {property: each}}}
+                    return_list.append(self.check_triggers(new_data, config[prop_type]['any']))                                       
+                if "any" in config[prop_type]:
+                    return any(return_list)
+                elif "every" in config[prop_type]: 
+                    return all(return_list)
+                elif "none" in config[prop_type]:
+                    return not any(return_list)
                 else:
-                    return False
-                    
+                    return False            
+        
+        if 'and' in config: # Recursively check for 'and' and 'or' triggers.
+            return all(self.check_triggers(data, each) for each in config['and'])
+        
+        elif 'or' in config: # Recursively check for 'and' and 'or' triggers.
+            return any(self.check_triggers(data, each) for each in config['or'])
+        
+        elif 'created' in config:
+            if 'new page' in data:
+                return True
+            else:
+                return False         
+        
+        elif 'property' in config: 
+            if "property changed" in data:
+                for property in data['property changed']['new property']:
+                    if property == config['property']:
+                        try:
+                            prop_type = data['property changed']['new property'][property]['type']
+                            package = data['property changed']['new property'][property][prop_type]
+                            router = { # This is a dictionary of functions that return the data in the correct format.
+                                'select': is_selstat(data, property, prop_type),
+                                'status': is_selstat(data, property, prop_type),
+                                'formula': is_formula(data, property, prop_type),
+                                'rich_text': is_rich_text(data, property, prop_type),
+                                'relation': is_relation(data, property, prop_type),
+                                'date': is_date(data, property, prop_type),
+                                'files': is_files(data, property, prop_type),
+                                'last_edited_by': is_last_edited_by(data, property, prop_type),
+                                'multi_select': is_multi_select(data, property, prop_type),
+                                'rollup': is_rollup(data, property, prop_type)
+                            }
+                            package = router[prop_type]
+                        except Exception as e:
+                            self.logger.error(f"Something in check_triggers failed: {property}\n{e}")
+                            self.automated_emails.send_email(self.EMAIL_ME_PATH, "NotionEventListener:Error in check_triggers", f"Error in check_triggers: {property}\n{e}")
+                            return False
+                        
+                        return self.trigger_compare(package, config[prop_type])  
             else:
                 return False
-            
-            pass  
-        
-        return parse_trigger(data, trigger_config)
+                
+        else:
+            return False
     
-    def trigger_compare(self, new_property, config):
-        def date_convert(new_prop, config_prop):
+        return False 
+    
+    def trigger_compare(self, new_property, config): # Refactor this as a dictionary of functions.
+        def date_convert(new_prop, config_prop=None): # Converts date strings to datetime objects.
             try:
                 new_prop = datetime.fromisoformat(new_prop)
             except ValueError:
                 self.logger.error(f"Invalid date format for property: {new_prop}")
                 return False
             
-            try:
-                config_prop = datetime.fromisoformat(config_prop)
-            except ValueError:
-                self.logger.error(f"Invalid date format for config: {config_prop}")
-                return False
+            if config_prop:
+                try:
+                    config_prop = datetime.fromisoformat(config_prop)
+                except ValueError:
+                    self.logger.error(f"Invalid date format for config: {config_prop}")
+                    return False
             
-            return new_prop, config_prop
+            return new_prop, config_prop if config_prop else new_prop
+
+        def check_after(new_property, config_value):
+            new_property, config_value = date_convert(new_property, config_value)
+            if new_property and config_value:
+                return new_property > config_value
+            return False
         
-        def date_convert(new_prop):
-            try:
-                new_prop = datetime.fromisoformat(new_prop)
-            except ValueError:
-                self.logger.error(f"Invalid date format for property: {new_prop}")
-                return False
-            
-            return new_prop
+        def check_before(new_property, config_value):
+            new_property, config_value = date_convert(new_property, config_value)
+            if new_property and config_value:
+                return new_property < config_value
+            return False
         
-        if 'contains' in config:
-            return config['contains'] in new_property
-        
-        elif 'does_not_contain' in config:
-            return config['does_not_contain'] not in new_property
-        
-        elif 'equals' in config:
-            return new_property == config['equals']
-        
-        elif 'does_not_equal' in config:
-            return new_property != config['does_not_equal']
-        
-        elif 'ends_with' in config:
-            return new_property.endswith(config['ends_with'])
-        
-        elif 'starts_with' in config:
-            return new_property.startswith(config['starts_with'])
-        
-        elif 'is_empty' in config:
-            return new_property == ''
-        
-        elif 'is_not_empty' in config:
-            return new_property != ''
-        
-        elif 'less_than' in config:
-            return new_property < config['less_than']
-        
-        elif 'greater_than' in config:
-            return new_property > config['greater_than']
-        
-        elif 'less_than_or_equal_to' in config:
-            return new_property <= config['less_than_or_equal_to']
-        
-        elif 'greater_than_or_equal_to' in config:
-            return new_property >= config['greater_than_or_equal_to']
-        
-        elif 'after' in config:
-            new_property, config['after'] = date_convert(new_property, config['after'])
-            return new_property > config['after']
-        
-        elif 'before' in config:
-            new_property, config['before'] = date_convert(new_property, config['before'])
-            return new_property < config
-        
-        elif 'next_month' in config:
+        def check_next_month(new_property):
             new_property = date_convert(new_property)
-            
             if new_property:
                 today = datetime.now()
                 one_month_from_today = today + timedelta(days=30)
                 return today <= new_property <= one_month_from_today
-            
             return False
         
-        elif 'next_year' in config:
+        def check_next_year(new_property):
             new_property = date_convert(new_property)
             if new_property:
                 today = datetime.now()
@@ -374,7 +313,7 @@ class NotionEventListener:
                 return today <= new_property <= one_year_from_today
             return False
         
-        elif 'next_week' in config:
+        def check_next_week(new_property):
             new_property = date_convert(new_property)
             if new_property:
                 today = datetime.now()
@@ -382,59 +321,88 @@ class NotionEventListener:
                 return today <= new_property <= one_week_from_today
             return False
         
-        elif 'on_or_after' in config:
-            new_property, config['on_or_after'] = date_convert(new_property, config['on_or_after'])
-            if new_property and config['on_or_after']:
-                return new_property >= config['on_or_after']
+
+        def check_on_or_after(self, new_property, config_value):
+            new_property, config_value = date_convert(new_property, config_value)
+            if new_property and config_value:
+                return new_property >= config_value
             return False
-        
-        elif 'on_or_before' in config:
-            new_property, config['on_or_before'] = date_convert(new_property, config['on_or_before'])
-            if new_property and config['on_or_before']:
-                return new_property <= config['on_or_before']
+
+        def check_on_or_before(self, new_property, config_value):
+            new_property, config_value = date_convert(new_property, config_value)
+            if new_property and config_value:
+                return new_property <= config_value
             return False
-        
-        elif 'past_month' in config:
+
+        def check_past_month(self, new_property):
             new_property = date_convert(new_property)
             if new_property:
                 today = datetime.now()
                 one_month_ago = today - timedelta(days=30)
                 return one_month_ago <= new_property <= today
             return False
-        
-        elif 'past_year' in config:
+
+        def check_past_year(self, new_property):
             new_property = date_convert(new_property)
             if new_property:
                 today = datetime.now()
                 one_year_ago = today - timedelta(days=365)
                 return one_year_ago <= new_property <= today
             return False
-        
-        elif 'past_week' in config:
+
+        def check_past_week(self, new_property):
             new_property = date_convert(new_property)
             if new_property:
                 today = datetime.now()
                 one_week_ago = today - timedelta(days=7)
                 return one_week_ago <= new_property <= today
             return False
-        
-        elif 'this_week' in config:
+
+        def check_this_week(self, new_property):
             new_property = date_convert(new_property)
             if new_property:
                 current_week = datetime.now().isocalendar()[1]
                 next_prop_week = new_property.isocalendar()[1]
                 return current_week == next_prop_week
-            return False
+            return False        
         
-        else:
-            self.logger.error(f"Trigger config error: {config}")
-            return False
+        config_checks = { # Dictionary of functions that compare the new property to the config value.
+            'contains': lambda np, cv: cv in np,
+            'does_not_contain': lambda np, cv: cv not in np,
+            'equals': lambda np, cv: np == cv,
+            'does_not_equal': lambda np, cv: np != cv,
+            'ends_with': lambda np, cv: np.endswith(cv),
+            'starts_with': lambda np, cv: np.startswith(cv),
+            'is_empty': lambda np, _: np == '',
+            'is_not_empty': lambda np, _: np != '',
+            'less_than': lambda np, cv: np < cv,
+            'greater_than': lambda np, cv: np > cv,
+            'less_than_or_equal_to': lambda np, cv: np <= cv,
+            'greater_than_or_equal_to': lambda np, cv: np >= cv,
+            'after': check_after,
+            'before': check_before,
+            'next_month': check_next_month,
+            'next_year': check_next_year,
+            'next_week': check_next_week,
+            'on_or_after': check_on_or_after,
+            'on_or_before': check_on_or_before,
+            'past_month': check_past_month,
+            'past_year': check_past_year,
+            'past_week': check_past_week,
+            'this_week': check_this_week
+        }
+        
+        for key, check_function in config_checks.items():
+            if key in config:
+                if key in ['on_or_after', 'on_or_before', 'less_than', 'greater_than']:
+                    return check_function(new_property, config[key])
+                else:
+                    return check_function(new_property, config[key] if key in config else None)        
+        
+        self.logger.error(f"Trigger config error: {config}")
+        return False
 
-
-    # Specifically checks if the New Data has added or changed a property from the old data. Does NOT check if old data has things that the new data does not. I'll add it if it becomes relevant.
-        pass
-
-        # Checks for changes in the data, returns a dictionary of changes and additions.
+    # Checks for changes in the data, returns a dictionary of changes and additions.
     def check_change(self, old_data, new_data, active_properties):
         """_summary_
 
