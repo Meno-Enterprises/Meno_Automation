@@ -1,12 +1,45 @@
 #!/usr/bin/env python3
+# Aria Corona Sept 19th, 2024
+# Some comments and docstrings are AI generated and may not be accurate, but seem to be mostly correct probably.
 
-'''
-dependancies:
+
+'''This script listens for changes in Notion databases and triggers actions based on the configuration.
+Dependencies:
 - NotionApiHelper.py
 - AutomatedEmails.py
 - Notion database must contain the "Last edited time" property.
 - pip install deepdiff
+Modules:
+- NotionApiHelper: Helper functions for interacting with the Notion API.
+- AutomatedEmails: Functions for sending automated emails.
+- deepdiff: Library for deep comparison of Python objects.
+- time, os, requests, uuid, cronitor, gc, logging, json, datetime, timedelta: Standard Python libraries.
+Classes:
+- NotionEventListener: Main class that listens for changes in Notion databases and triggers actions.
+Configuration:
+- CRONITOR_KEY_PATH: Path to the Cronitor API key file.
+- SLEEP_TIMER: Time in seconds to sleep between each loop.
+- PING_CYCLE: Number of loops before pinging Cronitor.
+- GC_CYCLE: Number of loops before running garbage collection.
+- CONFIG_RELOAD_CYCLE: Number of loops before reloading the config file.
+- STOP_CYCLE: Number of loops before stopping the script.
+Methods:
+- __init__: Initializes the NotionEventListener class.
+- update_filter_time: Updates the query filter time.
+- listen: Listens to changes in the configured Notion databases and triggers actions based on the configuration.
+- get_active_properties: Returns a unique list of database properties based on the configuration files for a given database.
+- check_triggers: Recursively checks for triggers in the data.
+- trigger_compare: Compares a new property value against a configuration using various comparison functions.
+- check_change: Checks for changes in the data and returns a dictionary of changes and additions.
+- query_database: Queries the specified database and returns the response.
+- load_storage: Loads the previous query results from storage.
+- save_storage: Saves the current query results to storage.
+- storage_exists: Checks if storage exists for a given database.
+- take_action: Takes an action based on the specified action configuration.
+- check_config: Checks the configuration file for changes and reloads it if necessary.
+
 '''
+
 
 
 from NotionApiHelper import NotionApiHelper
@@ -29,6 +62,7 @@ PING_CYCLE = 100 # Number of loops before pinging cronitor.
 GC_CYCLE = 500 # Number of loops before running garbage collection.
 CONFIG_RELOAD_CYCLE = 100 # Number of loops before reloading the config file.
 STOP_CYCLE = 10000 # Number of loops before stopping the script.
+
 class NotionEventListener:
     def __init__(self):
         self.notion_helper = NotionApiHelper()
@@ -51,6 +85,33 @@ class NotionEventListener:
         self.query_filter['last_edited_time'] = {"on_or_after": (datetime.now() - timedelta(minutes=self.query_lookback_time)).strftime('%Y-%m-%dT%H:%M:%S')}
 
     def listen(self):
+        """
+        Listens to changes in the configured Notion databases and triggers actions based on the configuration.
+        This method performs the following steps:
+        1. Iterates over each database ID in the configuration.
+        2. Normalizes the database ID by removing hyphens.
+        3. Sets up query property filters to maximize efficiency.
+        4. Loads the previous query results from storage or initializes storage if it doesn't exist.
+        5. Queries the database for changes.
+        6. Checks for changes between the previous and current query results.
+        7. If changes are detected, checks for triggers in the configuration and takes appropriate actions.
+        8. Saves the current query results to storage.
+        9. Updates the query lookback time based on the script's runtime.
+        Attributes:
+            start_time (datetime): The start time of the listening process.
+            db_id (str): The normalized database ID.
+            filter_properties (list or None): List of properties to filter the query or None if no filters are found.
+            active_properties (list): List of active properties in the database.
+            content_filter (dict): The content filter for querying the database.
+            last_query (dict): The previous query results loaded from storage.
+            response (dict): The current query results from the database.
+            difference (dict): The differences between the previous and current query results.
+            activate_trigger (bool): Indicates if a trigger condition is met.
+            package (dict): The package of changes to be processed by the action.
+        Raises:
+            Exception: If there is an issue with querying the database or processing the configuration.
+        """
+        
         start_time = datetime.now()
         for db_id in self.config:
             db_id = db_id.replace('-','') # Normalizing db ID now so it's not a problem again later.
@@ -67,14 +128,14 @@ class NotionEventListener:
                             print(f"Property {property_id} already in filter list.")
                             continue
                         filter_properties.append(property_id)
-            if filter_properties == []:
+            if filter_properties == []: # If no filter properties are found, set to None.
                 filter_properties = None
             
             active_properties = self.get_active_properties(db_id)
             print(f"Listening to database {db_id}, with filter properties {filter_properties}")
             
             # Pull Content Filter from Config, defaults to self.query_filter if not found.
-            if 'content_filter' in self.config[db_id]:
+            if 'content_filter' in self.config[db_id]: 
                 content_filter = self.config[db_id]['content_filter']
             else:
                 content_filter = self.query_filter
@@ -108,14 +169,14 @@ class NotionEventListener:
 
             print(f"Difference: {json.dumps(difference, indent=4)}")
             
-            for db_config_page in self.config[db_id]:
-                for page in difference:
+            for db_config_page in self.config[db_id]: # Check for triggers in the config file.
+                for page in difference: # Check for triggers in the difference.
                     activate_trigger = self.check_triggers(difference[page], db_config_page['trigger'])
                     print(f" Active Trigger: {activate_trigger}")
-                    if activate_trigger:
+                    if activate_trigger: # If trigger is met, take action.
                         print(f"Trigger met for page {page} in database {db_id}.")
                         
-                        if 'action' in db_config_page:
+                        if 'action' in db_config_page: 
                             package = {page: difference[page]}
                             self.take_action(db_config_page['action'], package)
                             
@@ -126,10 +187,23 @@ class NotionEventListener:
             time.sleep(5)
             print("Database updated.")
             
-        self.query_lookback_time = (datetime.now() - start_time).total_seconds() / 60 + 10
-        self.first_run = False
+        self.query_lookback_time = (datetime.now() - start_time).total_seconds() / 60 + 10 # Update lookback time based on how long the script has been running.
+        self.first_run = False # Set first run to false after the first run.
             
     def get_active_properties(self, db_id): # Returns a unique list of DB properties based off the config files for a given DB.
+        """
+        Returns a unique list of database properties based on the configuration files for a given database.
+        This method parses the triggers defined in the configuration files and extracts the properties
+        associated with those triggers. It supports nested 'and' and 'or' conditions within the triggers.
+        Args:
+            db_id (str): The ID of the database for which to retrieve active properties.
+        Returns:
+            list: A list of unique properties extracted from the configuration files for the specified database.
+            If the database ID is not found in the configuration, an empty list is returned.
+        Raises:
+            KeyError: If the database ID is not present in the configuration.
+        """
+        
         active_properties = []
         def parse_trigger(trigger):
             if 'and' in trigger:
@@ -154,7 +228,20 @@ class NotionEventListener:
             
         return active_properties
             
-    def check_triggers(self, data, config):
+    def check_triggers(self, data, config): # Recursively checks for triggers in the data.
+        """
+        Recursively checks for triggers in the data.
+        This method evaluates the provided data against the specified configuration to determine if any triggers are activated. 
+        It supports various property types and logical conditions such as 'and', 'or', and 'created'.
+        Args:
+            data (dict): The data to be checked for triggers. This typically includes information about property changes.
+            config (dict): The configuration specifying the triggers to check. This can include logical conditions and property-specific checks.
+        Returns:
+            bool: True if any of the specified triggers are activated, False otherwise.
+        Raises:
+            Exception: If an error occurs during the trigger check, it logs the error and sends an email notification.
+        """
+        
         def is_selstat(data, property, prop_type):
             return data['property changed']['new property'][property][prop_type]["name"]
         
@@ -269,6 +356,42 @@ class NotionEventListener:
         return False 
     
     def trigger_compare(self, new_property, config): # Refactor this as a dictionary of functions.
+        """ Summary
+        Compares a new property value against a configuration using various comparison functions.
+        Args:
+            new_property (str): The new property value to be compared.
+            config (dict): A dictionary containing the configuration for comparison. The keys in this dictionary
+                           determine which comparison function to use.
+        Returns:
+            bool: The result of the comparison. Returns True if the comparison is successful, False otherwise.
+        Comparison Functions:
+            - 'contains': Checks if the config value is contained within the new property.
+            - 'does_not_contain': Checks if the config value is not contained within the new property.
+            - 'equals': Checks if the new property is equal to the config value.
+            - 'does_not_equal': Checks if the new property is not equal to the config value.
+            - 'ends_with': Checks if the new property ends with the config value.
+            - 'starts_with': Checks if the new property starts with the config value.
+            - 'is_empty': Checks if the new property is an empty string.
+            - 'is_not_empty': Checks if the new property is not an empty string.
+            - 'less_than': Checks if the new property is less than the config value.
+            - 'greater_than': Checks if the new property is greater than the config value.
+            - 'less_than_or_equal_to': Checks if the new property is less than or equal to the config value.
+            - 'greater_than_or_equal_to': Checks if the new property is greater than or equal to the config value.
+            - 'after': Checks if the new property date is after the config date.
+            - 'before': Checks if the new property date is before the config date.
+            - 'next_month': Checks if the new property date is within the next month.
+            - 'next_year': Checks if the new property date is within the next year.
+            - 'next_week': Checks if the new property date is within the next week.
+            - 'on_or_after': Checks if the new property date is on or after the config date.
+            - 'on_or_before': Checks if the new property date is on or before the config date.
+            - 'past_month': Checks if the new property date is within the past month.
+            - 'past_year': Checks if the new property date is within the past year.
+            - 'past_week': Checks if the new property date is within the past week.
+            - 'this_week': Checks if the new property date is within the current week.
+        Raises:
+            ValueError: If the date format of the new property or config value is invalid.
+        """
+
         def date_convert(new_prop, config_prop=None): # Converts date strings to datetime objects.
             try:
                 new_prop = datetime.fromisoformat(new_prop)
