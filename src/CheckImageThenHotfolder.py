@@ -61,6 +61,14 @@ Image correction logic:
             c. If customer is on the no-preflight list, crop to correct aspect ratio and size without scaling and move to hotfolder.
 '''
 
+CRONITOR_KEY_PATH = "conf/Cronitor_API_Key.txt"
+PING_CYCLE = 300
+GC_CYCLE = 3600
+STOP_TIME = '23:55:00' # Time to stop the script
+PATH = r"\\192.168.0.178\meno\Hotfolders\Hopper"  # Replace with the path to your hotfolder
+OBSERVER = Observer()
+
+
 class HotfolderHandler(FileSystemEventHandler):
     def __init__(self):
         self.notion_helper = NotionApiHelper()
@@ -587,30 +595,24 @@ class HotfolderHandler(FileSystemEventHandler):
         
 
 if __name__ == "__main__":
-    CRONITOR_KEY_PATH = "conf/Cronitor_API_Key.txt"
-    PING_CYCLE = 300
-    GC_CYCLE = 3600
-    #email_config_path = "conf/MOD_Preflight_Launch_Conf.json"
-    #auto_emails = AutomatedEmails()
-    PATH = r"\\192.168.0.178\meno\Hotfolders\Hopper"  # Replace with the path to your hotfolder
     EVENT_HANDLER = HotfolderHandler()
-    OBSERVER = Observer()
     OBSERVER.schedule(EVENT_HANDLER, PATH, recursive=False)
     OBSERVER.start()
     gc.enable()
     
     with open(CRONITOR_KEY_PATH, "r") as file:
         cronitor_api_key = file.read()
-        
+
     cronitor.api_key = cronitor_api_key
     MONITOR = cronitor.Monitor("MOD Preflight Script")
     MONITOR.ping(state='run')
     print(f"Monitoring directory: {PATH}")
     tick = 0
+ 
     
     try:
         while True:
-            
+            tick += 1            
             time.sleep(1)
             
             if tick % PING_CYCLE == 0:
@@ -621,8 +623,15 @@ if __name__ == "__main__":
             if tick % GC_CYCLE == 0:
                 gc.collect()
                 tick = 0
+                  
+            now = time.strftime('%H:%M:%S')
+            if now >= STOP_TIME:
+                print(f"Time is after {STOP_TIME} EST. Stopping the observer.")
+                MONITOR.ping(state='complete')
+                OBSERVER.stop()
+                break
+
                 
-            tick += 1
     except KeyboardInterrupt:
         MONITOR.ping(state='complete')
         OBSERVER.stop()
