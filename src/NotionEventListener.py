@@ -142,7 +142,7 @@ class NotionEventListener:
             
             # Load previous query
             if not self.storage_exists(db_id) or self.first_run: # Storage does not exist, create it.
-                self.save_storage(db_id, self.query_database(db_id, filter_properties, content_filter))
+                self.save_storage(db_id, self.query_database(db_id, filter_properties))
                 continue
             
             last_query = self.load_storage(db_id)
@@ -183,7 +183,8 @@ class NotionEventListener:
                         else:
                             print(f"No action found for page {page} in database {db_id}.")
             
-            self.save_storage(db_id, response)
+            print(f"Updating data storage for database {db_id}.")
+            self.update_storage(db_id, response)
             time.sleep(5)
             print("Database updated.")
             
@@ -264,7 +265,7 @@ class NotionEventListener:
         def is_relation(data, property, prop_type):
             package = []
                                 
-            if "has_more" in data['property changed']['new property'][property]: # If there are more than 25 relations, replace data with full data (up to 100).
+            if data['property changed']['new property'][property]['has_more']: # If there are more than 25 relations, replace data with full data (up to 100).
                 response = self.notion_helper.get_page_property(data, data['property changed']['new property'][property]['id'])
                 data['property changed']['new property'][property][prop_type] = response[prop_type]
             
@@ -327,20 +328,25 @@ class NotionEventListener:
                     if property == config['property']:
                         try:
                             prop_type = data['property changed']['new property'][property]['type']
+                            print(f"Property: {property}, Type: {prop_type}")
                             package = data['property changed']['new property'][property][prop_type]
+                            print(f"Package: {package}")
                             router = { # This is a dictionary of functions that return the data in the correct format.
-                                'select': is_selstat(data, property, prop_type),
-                                'status': is_selstat(data, property, prop_type),
-                                'formula': is_formula(data, property, prop_type),
-                                'rich_text': is_rich_text(data, property, prop_type),
-                                'relation': is_relation(data, property, prop_type),
-                                'date': is_date(data, property, prop_type),
-                                'files': is_files(data, property, prop_type),
-                                'last_edited_by': is_last_edited_by(data, property, prop_type),
-                                'multi_select': is_multi_select(data, property, prop_type),
-                                'rollup': is_rollup(data, property, prop_type)
+                                'select': is_selstat,
+                                'status': is_selstat,
+                                'formula': is_formula,
+                                'rich_text': is_rich_text,
+                                'relation': is_relation,
+                                'date': is_date,
+                                'files': is_files,
+                                'last_edited_by': is_last_edited_by,
+                                'multi_select': is_multi_select,
+                                'rollup': is_rollup
                             }
-                            package = router[prop_type]
+                            for key, check_router in router.items():
+                                if key == prop_type:
+                                    package = check_router(data, property, prop_type)
+                            print(f"Package: {package}")
                         except Exception as e:
                             self.logger.error(f"Something in check_triggers failed: {property}\n{e}")
                             self.automated_emails.send_email(self.EMAIL_ME_PATH, "NotionEventListener:Error in check_triggers", f"Error in check_triggers: {property}\n{e}")
@@ -392,7 +398,9 @@ class NotionEventListener:
             ValueError: If the date format of the new property or config value is invalid.
         """
 
+        print(f"trigger_compare: {new_property}, {config}")
         def date_convert(new_prop, config_prop=None): # Converts date strings to datetime objects.
+            print(f"date_convert: {new_prop}, {config_prop}")
             try:
                 new_prop = datetime.fromisoformat(new_prop)
             except ValueError:
@@ -517,7 +525,8 @@ class NotionEventListener:
         
         for key, check_function in config_checks.items():
             if key in config:
-                if key in ['on_or_after', 'on_or_before', 'less_than', 'greater_than']:
+                print(f"@ key: {key}, check_function: {check_function}, new_property: {new_property}", f"config value: {config[key]}")
+                if key not in ['this_week', 'next_week', 'past_week', 'next_month', 'past_month', 'next_year', 'past_year', "is_empty", "is_not_empty"]:
                     return check_function(new_property, config[key])
                 else:
                     return check_function(new_property, config[key] if key in config else None)        
@@ -631,6 +640,37 @@ class NotionEventListener:
     def save_storage(self, database_id, data):
         with open(f"{self.STORAGE_DIRECTORY}/{database_id}.json", 'w') as storage_file:
             json.dump(data, storage_file, indent=4)
+            
+    def update_storage(self, database_id, data): 
+        """
+        Updates the local storage with the provided data for a specific database.
+        This method compares the existing local data with the new data and updates the local storage accordingly.
+        It ensures that any new pages are added and existing pages are updated, while preserving pages that are not in the new data.
+        Args:
+            database_id (str): The ID of the database whose storage needs to be updated.
+            data (list): A list of dictionaries representing the new data to be stored. Each dictionary should contain an 'id' key.
+        Returns:
+            None
+        """
+        
+        local_data = self.load_storage(database_id)
+        page_index = {page['id']: page for page in data}
+        
+        updated_local_data = []
+        processed_ids = set()
+        
+        for old_page in local_data:
+            if old_page['id'] in page_index:
+                updated_local_data.append(page_index[old_page['id']])
+                processed_ids.add(old_page['id'])
+            else:
+                updated_local_data.append(old_page)
+        
+        for page_id, page in page_index.items():
+            if page_id not in processed_ids:
+                updated_local_data.append(page)
+            
+        self.save_storage(database_id, updated_local_data)
 
     def storage_exists(self, database_id):
         return os.path.exists(f"{self.STORAGE_DIRECTORY}/{database_id}.json")
@@ -707,6 +747,7 @@ if __name__ == "__main__":
         while onoff:
             counter += 1    
             listener.listen()
+            print(f"Sleeping...")
             time.sleep(SLEEP_TIMER)
             if counter % PING_CYCLE == 0:
                 MONITOR.ping()

@@ -207,6 +207,7 @@ class NotionApiHelper:
         page_size = self.PAGE_SIZE if get_all else page_num
         bodyJson = {"page_size": page_size, "filter": content_filter} if content_filter else {"page_size": page_size}
         filter_properties = "?filter_properties=" + "&filter_properties=".join(filter_properties) if filter_properties else ""
+        print(f"Body JSON: {json.dumps(bodyJson)}")
         databaseJson = self._make_query_request(databaseID, filter_properties, bodyJson)
         if not databaseJson:
             print("No data returned.")
@@ -465,4 +466,98 @@ class NotionApiHelper:
             'title': self.title_prop_gen(prop_name, prop_type, prop_value, prop_value2, annotation) # string, string, array of strings, array of strings, array of objects
         }
         return type_dict[prop_type]
-
+    
+    def return_property_value(self, property, id):
+        def is_simple(data, prop_type):
+            return data[prop_type]
+        
+        def is_uid(data, prop_type):
+            return data[prop_type]['prefix'] + data[prop_type]['number']
+        
+        def is_selstat(data, prop_type):
+            return data[prop_type]['name']
+        
+        def is_formula(data, prop_type):
+            form_type = data[prop_type]['type']
+            if form_type == "date":
+                return is_date(data[prop_type], form_type)
+            else:
+                return data[prop_type][form_type]     
+        
+        def is_rich_text(data, prop_type):
+            text_list = []
+            for text in data[prop_type]:
+                text_list.append(text['plain_text'])
+            return ", ".join(text_list)
+        
+        def is_relation(data, prop_type):
+            package = []
+            if "has_more" in data:
+                if data["has_more"]: # If there are more than 25 relations, replace data with full data (up to 100).
+                    response = self.get_page_property(id, data['id'])
+                    data[prop_type] = response[prop_type]
+            
+            for id in data[prop_type]:
+                package.append(id['id'])
+        
+        def is_date(data, prop_type):
+            return data[prop_type]['start']
+        
+        def is_files(data, prop_type):
+            file_list = []
+            for file in data[prop_type]:
+                file_list.append(file['external']['url'])
+            return file_list
+        
+        def is_person(data, prop_type):
+            return data[prop_type]['id']
+        
+        def is_multi_select(data, prop_type):
+            package = []
+            for select in data[prop_type]:
+                package.append(select['name'])
+            return package
+        
+        def is_rollup(data, prop_type):
+            roll_type = data[prop_type]['type']
+            if roll_type == "array":
+                return_list = []
+                for each in data[prop_type]['array']:
+                    return_list.append(self.return_property_value(each, id))
+                return return_list
+            else:
+                return self.return_property_value(data[prop_type][roll_type], id)
+        
+        router = { # This is a dictionary of functions that return the data in the correct format.
+            'checkbox': is_simple,
+            'created_by': is_person,
+            'created_time': is_simple,
+            'email': is_simple,
+            'number': is_simple,
+            'phone_number': is_simple,
+            'people': is_multi_select, # This will return a list of names instead of IDs.
+            'url': is_simple,
+            'last_edited_time': is_simple,
+            'select': is_selstat,
+            'status': is_selstat,
+            'formula': is_formula,
+            'unique_id': is_uid,
+            'rich_text': is_rich_text,
+            'title': is_rich_text,
+            'relation': is_relation,
+            'date': is_date,
+            'files': is_files,
+            'last_edited_by': is_selstat, # This will return the name instead of the ID.
+            'multi_select': is_multi_select,
+            'rollup': is_rollup
+        }
+        try:
+            prop_type = property['type']
+            for key, check_router in router.items():
+                if key == prop_type:
+                    value = check_router(property, prop_type)
+            return value
+        except Exception as e:
+            print(f"Error returning property value: {e}")
+            logging.error(f"Error returning property value: {e}")
+            return None

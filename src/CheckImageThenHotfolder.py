@@ -377,11 +377,10 @@ class HotfolderHandler(FileSystemEventHandler):
             file_path = file_path.replace(".~#~", "")
             time.sleep(1)
             
-            if os.path.exists(file_path) == False:
+            if os.path.exists(file_path) == False: # Loops until the file is finished copying.
                 self.process_new_file(old_path)
                 return None
-            
-        # time.sleep(5) # Wait for file to finish copying
+
         allow_alter = 0
         now = time.strftime('%Y-%m-%d %H:%M:%S')
         print(f"{now} - Processing file: {file_path}")
@@ -393,15 +392,18 @@ class HotfolderHandler(FileSystemEventHandler):
             extension = re.search(self.EXTENSION_REGEX, file_name, re.IGNORECASE).group(2)
             print(f"Extension: {extension}")
 
-            # Check if file is an image
-            if extension is None or extension.lower() not in self.ACCEPTED_EXTENSIONS: 
-                print(f"File {file_name} is not an accepted image type. Skipping.")
-                return None
-            
             # Check if database ID is present in file name
             if job_id == None: 
                 print(f"Could not find database ID in {file_name}. Skipping.")
                 return None
+
+            # Check if file is an image
+            if extension is None or extension.lower() not in self.ACCEPTED_EXTENSIONS: 
+                print(f"File {file_name} is not an accepted image type. Skipping.")
+                self.report_error(job_id, f"{now} - File {file_name} is not an accepted image type. Skipping.", self.STOP_JOB_ERROR)
+                return None
+            
+
             
         except AttributeError:
             print(f"Could not find database ID or image extension in {file_name}. Skipping.")
