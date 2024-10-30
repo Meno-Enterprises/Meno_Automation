@@ -46,7 +46,7 @@ from NotionApiHelper import NotionApiHelper
 from AutomatedEmails import AutomatedEmails
 from deepdiff import DeepDiff
 import time, os, requests, uuid, cronitor, gc
-import logging
+import logging, subprocess
 import json
 from datetime import datetime, timedelta
 
@@ -56,11 +56,13 @@ with open(CRONITOR_KEY_PATH, "r") as file:
         
 cronitor.api_key = cronitor_api_key
 MONITOR = cronitor.Monitor("Notion Event Listener")
-gc.enable()
+
+gc.enable() # Garbage Collection
+
 SLEEP_TIMER = 30 # Seconds
 PING_CYCLE = 100 # Number of loops before pinging cronitor.
-GC_CYCLE = 500 # Number of loops before running garbage collection.
-CONFIG_RELOAD_CYCLE = 100 # Number of loops before reloading the config file.
+GC_CYCLE = 200 # Number of loops before running garbage collection.
+CONFIG_RELOAD_CYCLE = 20 # Number of loops before reloading the config file.
 STOP_CYCLE = 10000 # Number of loops before stopping the script.
 
 class NotionEventListener:
@@ -72,17 +74,21 @@ class NotionEventListener:
         self.STORAGE_DIRECTORY = "storage"
         self.CONFIG_PATH = "conf/NotionEventListener_Conf.json"
         self.EMAIL_ME_PATH = "conf/Aria_Email_Conf.json"
-        self.query_lookback_time = 45 # Minutes, How far back to look for changes on initial start.
+        self.query_lookback_time = 45 # Changing this doesn't actually do anything anymore.
         self.QUERY_LOOKBACK_PADDING = 5 # Minutes, Padding on how far back to look for changes on subsequent queries.
         self.QUERY_LOOKBACK = (datetime.now() - timedelta(minutes=self.query_lookback_time)).strftime('%Y-%m-%dT%H:%M:%S')
-        self.query_filter = {"timestamp": "last_edited_time", "last_edited_time": {"on_or_after": self.QUERY_LOOKBACK}} # Default query filter. Overrided by config.
+        self.query_filter = {
+            "timestamp": "last_edited_time", "last_edited_time": {"on_or_after": self.QUERY_LOOKBACK}
+            } # Default query filter. Overrided by config.
         self.config = {}
         self.first_run = True
     
         os.makedirs(self.STORAGE_DIRECTORY, exist_ok=True)
         
     def update_filter_time(self):
-        self.query_filter['last_edited_time'] = {"on_or_after": (datetime.now() - timedelta(minutes=self.query_lookback_time)).strftime('%Y-%m-%dT%H:%M:%S')}
+        self.query_filter['last_edited_time'] = {
+            "on_or_after": (datetime.now() - timedelta(minutes=self.query_lookback_time)).strftime('%Y-%m-%dT%H:%M:%S')
+            }
 
     def listen(self):
         """
@@ -534,9 +540,9 @@ class NotionEventListener:
         self.logger.error(f"Trigger config error: {config}")
         return False
 
-    # Checks for changes in the data, returns a dictionary of changes and additions.
     def check_change(self, old_data, new_data, active_properties):
-        """_summary_
+        """
+        Checks for changes in the data, returns a dictionary of changes and additions.
 
         Args:
             old_data (dict): Previously stored data.
@@ -613,6 +619,11 @@ class NotionEventListener:
         if "email" in action:
             for conf in action['email']:
                 self.notify_email(conf, data)
+        
+        if "py_script" in action:
+            for script in action['py_script']:
+                self.start_script(script, data)
+            
         '''
         "action": {
             "email": [{"subject": "Subject", "body": "Body", "path": "path/to/config.json"}]
@@ -692,19 +703,6 @@ class NotionEventListener:
         self.config['config'].append(dictionary)
         self.save_config()
 
-    # Trigger construction mimicks the Notion filter structure. https://developers.notion.com/reference/post-database-query-filter#the-filter-object
-    def build_config_part(self, database_id, trigger, action = None,content_filter = None, properties_filter = None): 
-        config_part = {
-            "uid": str(uuid.uuid4()),
-            "database_id": database_id, # String
-            "action": action, # Dictionary
-            "content_filter": content_filter, # Dictionary
-            "properties_filter": properties_filter, # List of Strings
-            "trigger": trigger # Dictionary
-        }
-        print(config_part)
-        pass
-
     def query_database(self, db_id, filter_properties = None, content_filter = None):
         print(f"Querying database {db_id}")
         print(f"Filter properties: {filter_properties}")
@@ -735,6 +733,19 @@ class NotionEventListener:
     def notify_slack(self, data):
         pass
 
+    def start_script(self, script_path, data):
+        if data:
+            page_id = list(data.keys())[0]
+            
+            try:
+                subprocess.Popen(['python', script_path, page_id])
+                logging.info(f"Script {script_path} started for page {page_id}")
+            except Exception as e:
+                logging.error(f"Failed to start script {script_path} for page {page_id}: {e}")
+        else:
+            logging.error(f"No data provided to start script {script_path}")
+        pass
+    
 if __name__ == "__main__":
     listener = NotionEventListener()
     counter = 0 # Tracking number of loops to trigger different events. ie. refreshing config, pinging monitoring service, clean memory, etc.
