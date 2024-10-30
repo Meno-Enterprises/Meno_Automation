@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-# Aria Corona Sept 19th, 2024
+# Aria Corona Oct. 29th, 2024
 # This script is designed to monitor a hotfolder for new files, check if they are images, and process them for preflight.
 
 import time, os, re, shutil, cronitor, gc
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+# from watchdog.observers import Observer
+# from watchdog.events import FileSystemEventHandler
 from NotionApiHelper import NotionApiHelper
 from AutomatedEmails import AutomatedEmails
 from pathlib import Path
@@ -66,10 +66,9 @@ PING_CYCLE = 300
 GC_CYCLE = 3600
 STOP_TIME = '23:55:00' # Time to stop the script
 PATH = r"\\192.168.0.178\meno\Hotfolders\Hopper"  # Replace with the path to your hotfolder
-OBSERVER = Observer()
 
 
-class HotfolderHandler(FileSystemEventHandler):
+class HotfolderHandler():
     def __init__(self):
         self.notion_helper = NotionApiHelper()
         self.automated_emails = AutomatedEmails()
@@ -100,13 +99,15 @@ class HotfolderHandler(FileSystemEventHandler):
         warnings.simplefilter('ignore', Image.DecompressionBombWarning) # Suppresses DecompressionBombWarning
         Image.MAX_IMAGE_PIXELS = 600000000     # Ups the max image size to account for large 300DPI images.
 
-    def on_created(self, event):
-        if event.is_directory:
-            return None
-        else:
-            print(f"New file detected: {event.src_path}")
-            # Add your processing logic here
-            self.process_new_file(event.src_path)
+
+    def check_directory(self, directory_path):
+        try:
+            # List all files in the directory
+            files = [f for f in os.listdir(directory_path) if os.path.isfile(os.path.join(directory_path, f))]
+            return files
+        except Exception as e:
+            print(f"Error accessing directory {directory_path}: {e}")
+            return []
 
     def get_image_info(self, image_path):
         print(f"Getting image info for {image_path}.")
@@ -120,6 +121,17 @@ class HotfolderHandler(FileSystemEventHandler):
         return size, dpi
     
     def adjust_dpi_and_move(self, image, hotfolder, file_name, job_id):
+        """
+        Adjusts the DPI of the given image to 150 and moves it to the specified hotfolder.
+        Parameters:
+        image (PIL.Image.Image): The image to be processed.
+        hotfolder (str): The name of the hotfolder where the image will be moved.
+        file_name (str): The name of the file to be saved.
+        job_id (str): The job identifier associated with the image.
+        Returns:
+        None
+        """
+              
         print(f"Adjusting DPI to 150 and moving to {hotfolder}.")
         new_path = f"{self.HOTFOLDER_PATH}/{hotfolder}/{file_name}"
         if os.path.exists(new_path):
@@ -137,16 +149,27 @@ class HotfolderHandler(FileSystemEventHandler):
             scale_factor = max(scale_factor_width, scale_factor_height)       
             
             print(f"Scaling image by {scale_factor}.")
-            scaled_image = image.resize((int(original_size[0] * scale_factor), int(original_size[1] * scale_factor)), Image.LANCZOS) # Resize image to target size
+            scaled_image = image.resize(
+                (int(original_size[0] * scale_factor), int(original_size[1] * scale_factor)), Image.LANCZOS
+                ) # Resize image to target size
 
             # Crop the image and save it to the hotfolder.
-            self.crop_and_move(scaled_image, hotfolder, image_file_name, target_xpix, target_ypix, job_id, existing_job_log)
+            self.crop_and_move(
+                scaled_image, hotfolder, image_file_name, target_xpix, target_ypix, job_id, existing_job_log
+                )
 
         except Exception as e:
             print(f"Critical error resizing image: {e}")
             now = time.strftime('%Y-%m-%d %H:%M:%S')
-            self.report_error(job_id, f"{existing_job_log}{now} - Critical Error resizing image: {e}\nPlease let someone know that CheckImageThenHotfolder.py had this error.", self.STOP_JOB_ERROR)
-        logging.info(f"Resized {image_file_name} from {original_size} to {target_xpix},{target_ypix} and moved to {hotfolder}.")
+            
+            self.report_error(
+                job_id, f"{existing_job_log}{now} - Critical Error resizing image: {e}\n" +
+                f"Please let someone know that CheckImageThenHotfolder.py had this error.", self.STOP_JOB_ERROR
+                )
+            
+        logging.info(
+            f"Resized {image_file_name} from {original_size} to {target_xpix},{target_ypix} and moved to {hotfolder}."
+            )
         pass
 
     def crop_and_move(self, image, hotfolder, file_name, target_xpix, target_ypix, job_id, job_log):
@@ -162,19 +185,28 @@ class HotfolderHandler(FileSystemEventHandler):
             if left == 0 and top == 0 and right == image.size[0] and bottom == image.size[1]:
                 print(f"Image does not need to be cropped. Saving to {hotfolder}.")
                 self.save_image(job_id, image, f"{self.HOTFOLDER_PATH}/{hotfolder}/{file_name}", icc_profile)
-                self.copy_image(job_id, f"{self.HOTFOLDER_PATH}/tmp/{file_name}", f"{self.HOTFOLDER_PATH}/{hotfolder}/{file_name}")
+                self.copy_image(
+                    job_id, f"{self.HOTFOLDER_PATH}/tmp/{file_name}", f"{self.HOTFOLDER_PATH}/{hotfolder}/{file_name}"
+                    )
                 
             else:
                 print(f"Image needs to be cropped. Cropping to {target_xpix},{target_ypix}.")
                 cropped_image = image.crop((int(left), int(top), int(right), int(bottom)))
                 new_path = f"{self.HOTFOLDER_PATH}/{hotfolder}/{file_name}"
+                
                 self.save_image(job_id, cropped_image, new_path, icc_profile)
                 print(f"Corrected {file_name} image to {target_xpix},{target_ypix} and moved to {hotfolder}.")
                 self.copy_image(job_id, f"{self.HOTFOLDER_PATH}/tmp/{file_name}", new_path)
+                
         except Exception as e:
+            
             print(f"Error resizing image: {e}")
             now = time.strftime('%Y-%m-%d %H:%M:%S')
-            self.report_error(job_id, f"{job_log}{now} - Critical Error cropping image: {e}\nFind Aria and let her know this broke.", self.STOP_JOB_ERROR)
+            self.report_error(
+                job_id, 
+                f"{job_log}{now} - Critical Error cropping image: {e}\nFind Aria and let her know this broke.", 
+                self.STOP_JOB_ERROR
+                )
 
     def move_to_hotfolder(self, hotfolder, file_name):
         print(f"Moving file {file_name} to {hotfolder}.")
@@ -219,7 +251,22 @@ class HotfolderHandler(FileSystemEventHandler):
 
     # Report error to Notion and log file. Report_error will handle writing all errors to the log file.
     def report_error(self, job_id, error_message, level = 0):
-        print(f"{job_id}: {error_message}")
+        """
+        Reports an error by logging it, printing it, and updating a Notion page with the error details.
+        Args:
+            job_id (str): The ID of the job where the error occurred.
+            error_message (str): The error message to be reported.
+            level (int, optional): The severity level of the error. Defaults to 0.
+        Error Levels:
+            - self.DPI_CHANGE_ERROR: Tags the error with "DPI Changed" and "OOS".
+            - self.IMAGE_RESIZED_ERROR: Tags the error with "Resized" and "OOS".
+            - self.IMAGE_CROPPED_ERROR: Tags the error with "Cropped" and "OOS".
+            - self.STOP_JOB_ERROR: Sets the system status to "Error".
+            - self.IMAGE_OOS_ERROR: Tags the error with "OOS" and sets the system status to "Error".
+            - self.UPDATE_LOG: Only logs the error message.
+            - Default: Sets the system status to "Error".
+        The method generates appropriate properties based on the error level and updates the Notion page with these properties.
+        """
         properties = {}
         
         logs = self.notion_helper.generate_property_body("Log", "rich_text", [error_message])
@@ -290,7 +337,9 @@ class HotfolderHandler(FileSystemEventHandler):
         try: # Get customer id
             customer_notion_id = order_results['properties']['Customer']['relation'][0]['id']
         except Exception as e:
-            self.report_error(order_id, f"Order Canceled. Error finding customer ID in order {order_id}: {e}", self.STOP_JOB_ERROR)
+            self.report_error(order_id,
+                f"Order Canceled. Error finding customer ID in order {order_id}: {e}", self.STOP_JOB_ERROR
+                )
             return
         time.sleep(.5)
         
@@ -300,10 +349,13 @@ class HotfolderHandler(FileSystemEventHandler):
             customer_email_string = customer_email_response['results'][0]['rich_text']['plain_text']
         except Exception as e:
             try:
-                customer_email_response = self.notion_helper.get_page_property(customer_notion_id, self.CUSTOMER_PROP_EMAIL_BACKUP)
+                customer_email_response = self.notion_helper.get_page_property(customer_notion_id, 
+                                                                               self.CUSTOMER_PROP_EMAIL_BACKUP)
                 customer_email_string = customer_email_response['email']
             except Exception as e:
-                self.report_error(order_id, f"Order Canceled. Error finding customer email in order {order_id}: {e}", self.STOP_JOB_ERROR)
+                self.report_error(order_id, 
+                                  f"Order Canceled. Error finding customer email in order {order_id}: {e}", 
+                                  self.STOP_JOB_ERROR)
                 return
             
         customer_email_list = re.findall(self.EMAIL_ADDRESS_PATTERN, customer_email_string)
@@ -317,7 +369,9 @@ class HotfolderHandler(FileSystemEventHandler):
                         canceled_job_list.append(id)
                         self.notion_helper.update_page(id, canceled_job_prop_body)
         except Exception as e:
-            self.report_error(order_id, f"Order Canceled. Error canceling jobs for order {order_id}: {e}", self.STOP_JOB_ERROR)
+            self.report_error(order_id, 
+                              f"Order Canceled. Error canceling jobs for order {order_id}: {e}", 
+                              self.STOP_JOB_ERROR)
             
         if len(canceled_job_list) == 0:
             print(f"No jobs found for order {order_id}.")
@@ -569,7 +623,9 @@ class HotfolderHandler(FileSystemEventHandler):
             print(f"Image size does not match target size. Resizing and moving to {hotfolder}.")
             image = self.open_image(file_path)
             self.resize_image(image, hotfolder, file_name, xpix, ypix, size, job_id, job_log)
-            self.report_error(job_id, f"{job_log}{now} - Image size {size} does not match target size ({xpix},{ypix}). Customer is on approved preflight list, resizing.", 2)
+            self.report_error(job_id,
+                              f"{job_log}{now} - Image size {size} does not match target size ({xpix},{ypix})."+
+                              "Customer is on approved preflight list, resizing.", 2)
             self.remove_file(file_path) # Remove original file
             return None
         
@@ -577,7 +633,9 @@ class HotfolderHandler(FileSystemEventHandler):
             print(f"Image size does not match target size. Cropping and moving to {hotfolder}.")
             image = self.open_image(file_path)
             self.crop_and_move(image, hotfolder, file_name, xpix, ypix, job_id, job_log)
-            self.report_error(job_id, f"{job_log}{now} - Image size {size} does not match target size ({xpix},{ypix}). Customer on the let it run list, cropping.", -1)
+            self.report_error(job_id, f"{job_log}{now} - Image size {size} does not match target size ({xpix},{ypix})."+
+                              "Customer on the let it run list, cropping.", -1)
+            self.remove_file(file_path) # Remove original file
         
         else: # Image size does not match target size at 150DPI. Cancel order and trash file.
             print(f"Image size does not match target size. Trashing file.")
@@ -598,8 +656,7 @@ class HotfolderHandler(FileSystemEventHandler):
 
 if __name__ == "__main__":
     EVENT_HANDLER = HotfolderHandler()
-    OBSERVER.schedule(EVENT_HANDLER, PATH, recursive=False)
-    OBSERVER.start()
+
     gc.enable()
     
     with open(CRONITOR_KEY_PATH, "r") as file:
@@ -614,7 +671,12 @@ if __name__ == "__main__":
     
     try:
         while True:
-            tick += 1            
+            tick += 1
+            file_list = EVENT_HANDLER.check_directory(PATH)
+            if file_list:
+                if file_list[0] != "Thumbs.db":
+                    EVENT_HANDLER.process_new_file(f"{PATH}/{file_list[0]}")
+            
             time.sleep(1)
             
             if tick % PING_CYCLE == 0:
@@ -630,15 +692,11 @@ if __name__ == "__main__":
             if now >= STOP_TIME:
                 print(f"Time is after {STOP_TIME} EST. Stopping the observer.")
                 MONITOR.ping(state='complete')
-                OBSERVER.stop()
                 break
-
-                
+     
     except KeyboardInterrupt:
         MONITOR.ping(state='complete')
-        OBSERVER.stop()
+
     except Exception as e:
         print(f"Critical Error: {e}")
         MONITOR.ping(state='fail')
-        OBSERVER.stop()
-    OBSERVER.join()
