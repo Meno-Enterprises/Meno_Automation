@@ -491,14 +491,18 @@ class NotionApiHelper:
             return ", ".join(text_list)
         
         def is_relation(data, prop_type):
+            print(f"Relation data: {data}")
             package = []
             if "has_more" in data:
                 if data["has_more"]: # If there are more than 25 relations, replace data with full data (up to 100).
+                    print(f"Gathering full relation data for {prop_type}")
                     response = self.get_page_property(id, data['id'])
                     data[prop_type] = response[prop_type]
             
             for id in data[prop_type]:
                 package.append(id['id'])
+                
+            return package
         
         def is_date(data, prop_type):
             return data[prop_type]['start']
@@ -553,9 +557,11 @@ class NotionApiHelper:
         }
         try:
             prop_type = property['type']
+            print(f"Property Type: {prop_type}")
             for key, check_router in router.items():
                 if key == prop_type:
                     value = check_router(property, prop_type)
+                    print(f"Found value: {value}")
             return value
         except Exception as e:
             print(f"Error returning property value: {e}")
