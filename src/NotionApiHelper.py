@@ -184,7 +184,7 @@ Accepts a range of property types and generates a dictionary based on the input.
             Acceptable Colors: Colors: "blue", "blue_background", "brown", "brown_background", "default", "gray", "gray_background", "green", "green_background", "orange", "orange_background", "pink", "pink_background", "purple", "purple_background", "red", "red_background", "yellow", "yellow_background"
 '''
 
-import requests, time, json, logging
+import requests, time, json, logging, sys
 
 class NotionApiHelper:
     MAX_RETRIES = 3
@@ -192,9 +192,8 @@ class NotionApiHelper:
     PAGE_SIZE = 100
     
 
-    def __init__(self):
-        # Load headers from the external JSON file
-        with open('src/headers.json', 'r') as file:
+    def __init__(self, header_path = 'src/headers.json'):
+        with open(header_path, 'r') as file:
             self.headers = json.load(file)
         
         self.endPoint = "https://api.notion.com/v1"
@@ -381,9 +380,17 @@ class NotionApiHelper:
         return {prop_name: {prop_type: file_body}}
 
     def mulsel_prop_gen(self, prop_name, prop_type, prop_values):
-        '''
-        Generates a multi-select or relation property dictionary.
-        '''
+        """
+        Generates a dictionary representing a multi-select property for a Notion API request.
+        Args:
+            prop_name (str): The name of the property.
+            prop_type (str): The type of the property (e.g., "multi_select").
+            prop_values (list): A list of values to be included in the property.
+        Returns:
+            dict: A dictionary with the property name as the key and a dictionary containing
+                  the property type and a list of dictionaries with the property values.
+        """
+        
         prop_value_new = []
         for value in prop_values:
             prop_value_new.append({"name": value})
@@ -469,6 +476,7 @@ class NotionApiHelper:
     
     def return_property_value(self, property, id):
         def is_simple(data, prop_type):
+            print(f"Simple Data: {data}")
             return data[prop_type]
         
         def is_uid(data, prop_type):
@@ -524,13 +532,16 @@ class NotionApiHelper:
         
         def is_rollup(data, prop_type):
             roll_type = data[prop_type]['type']
+            print(f"Rollup Type: {roll_type}")
             if roll_type == "array":
+                print(f"Rollup Array: {data[prop_type]['array']}")
                 return_list = []
                 for each in data[prop_type]['array']:
                     return_list.append(self.return_property_value(each, id))
                 return return_list
             else:
-                return self.return_property_value(data[prop_type][roll_type], id)
+                print(f"Rollup Value: {data[prop_type][roll_type]}")
+                return data[prop_type][roll_type]
         
         router = { # This is a dictionary of functions that return the data in the correct format.
             'checkbox': is_simple,
@@ -557,6 +568,7 @@ class NotionApiHelper:
         }
         try:
             prop_type = property['type']
+            print(f"Property Data: {property}")
             print(f"Property Type: {prop_type}")
             for key, check_router in router.items():
                 if key == prop_type:

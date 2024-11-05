@@ -7,7 +7,6 @@
 Dependencies:
 - NotionApiHelper.py
 - AutomatedEmails.py
-- Notion database must contain the "Last edited time" property.
 - pip install deepdiff
 Modules:
 - NotionApiHelper: Helper functions for interacting with the Notion API.
@@ -46,7 +45,7 @@ from NotionApiHelper import NotionApiHelper
 from AutomatedEmails import AutomatedEmails
 from deepdiff import DeepDiff
 import time, os, requests, uuid, cronitor, gc
-import logging, subprocess
+import logging, subprocess, sys
 import json
 from datetime import datetime, timedelta
 
@@ -68,6 +67,7 @@ STOP_CYCLE = 10000 # Number of loops before stopping the script.
 class NotionEventListener:
     def __init__(self):
         self.notion_helper = NotionApiHelper()
+        self.planet_helper = NotionApiHelper(header_path = "src/headers_pts.json")
         self.automated_emails = AutomatedEmails()
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         self.logger = logging.getLogger(__name__)
@@ -82,6 +82,7 @@ class NotionEventListener:
             } # Default query filter. Overrided by config.
         self.config = {}
         self.first_run = True
+        self.base = 'meno'
     
         os.makedirs(self.STORAGE_DIRECTORY, exist_ok=True)
         
@@ -126,6 +127,8 @@ class NotionEventListener:
             
             for db_config_page in self.config[db_id]: # Set up query property filters. Trying to do as few queries as possible to maximize efficiency.
                 print(f"Checking config page {db_config_page['uid']}")
+                if 'base' in db_config_page:
+                    self.base = db_config_page['base']
                 if 'filter_properties' in db_config_page:
                     print(f"Filter properties found in config page {db_config_page['uid']}")
                     for property_id in db_config_page['filter_properties']:
@@ -272,7 +275,10 @@ class NotionEventListener:
             package = []
                                 
             if data['property changed']['new property'][property]['has_more']: # If there are more than 25 relations, replace data with full data (up to 100).
-                response = self.notion_helper.get_page_property(data, data['property changed']['new property'][property]['id'])
+                if self.base == 'pts':
+                    response = self.planet_helper.get_page_property(data, data['property changed']['new property'][property]['id'])
+                else:
+                    response = self.notion_helper.get_page_property(data, data['property changed']['new property'][property]['id'])
                 data['property changed']['new property'][property][prop_type] = response[prop_type]
             
             for id in data['property changed']['new property'][property][prop_type]:
@@ -623,7 +629,7 @@ class NotionEventListener:
         if "py_script" in action:
             for script in action['py_script']:
                 self.start_script(script, data)
-            
+                
         '''
         "action": {
             "email": [{"subject": "Subject", "body": "Body", "path": "path/to/config.json"}]
@@ -703,12 +709,16 @@ class NotionEventListener:
         self.config['config'].append(dictionary)
         self.save_config()
 
-    def query_database(self, db_id, filter_properties = None, content_filter = None):
+    def query_database(self, db_id, filter_properties = None, content_filter = None, pts = False):
         print(f"Querying database {db_id}")
         print(f"Filter properties: {filter_properties}")
         print(f"Content filter: {content_filter}")
         self.update_filter_time()
-        return self.notion_helper.query(db_id, filter_properties, content_filter)
+        
+        if self.base == 'pts':
+            return self.planet_helper.query(db_id, filter_properties, content_filter)
+        else:
+            return self.notion_helper.query(db_id, filter_properties, content_filter)
     
     def store_previous_query(self, data, db_id):
         with open(os.path.join(self.STORAGE_DIRECTORY, f"{db_id}.json"), 'w') as file:
@@ -746,11 +756,21 @@ class NotionEventListener:
             logging.error(f"No data provided to start script {script_path}")
         pass
     
+    def catch_variable(self):
+        if len(sys.argv) > 1:
+            argument = sys.argv[1]
+            if argument == "-S" or argument == "--skip_startup":
+                self.first_run = False
+                logging.info(f"Starting script without database initializing")
+
+
+    
 if __name__ == "__main__":
     listener = NotionEventListener()
     counter = 0 # Tracking number of loops to trigger different events. ie. refreshing config, pinging monitoring service, clean memory, etc.
     
     listener.load_config()
+    listener.catch_variable()
     MONITOR.ping(state='run')
 
     onoff = True
