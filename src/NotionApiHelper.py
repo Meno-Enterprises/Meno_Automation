@@ -249,6 +249,7 @@ class NotionApiHelper:
             response.raise_for_status()
             print("Post request successful.")
             return response.json()
+        
         except requests.exceptions.RequestException as e:
             if self.counter < self.MAX_RETRIES:
                 print(f"Network error occurred: {e}. Trying again in {self.RETRY_DELAY} seconds.")
@@ -256,6 +257,7 @@ class NotionApiHelper:
                 time.sleep(self.RETRY_DELAY)
                 self.counter += 1
                 return self._make_query_request(databaseID, filter_properties, bodyJson)
+            
             else:
                 print(f"Network error occurred too many times: {e}")
                 logging.error(f"Network error occurred too many times: {e}")
@@ -338,7 +340,7 @@ class NotionApiHelper:
                 logging.error(f"Network error occurred: {e}. Trying again in {self.RETRY_DELAY} seconds.")
                 time.sleep(self.RETRY_DELAY)
                 self.counter += 1
-                return self.update_page(pageID, properties)
+                return self.update_page(pageID, properties, trash)
             else:    
                 logging.error(f"Network error occurred too many times: {e}")
                 time.sleep(3)
@@ -454,6 +456,8 @@ class NotionApiHelper:
                 rich_body.append({"type": "text", "text": {"content": x, "link": prop_value_link}, "annotations": default_annotations, "plain_text": x, "href": prop_value_link})
         return {prop_name: {"id": prop_type, "type": prop_type, prop_type: rich_body}}
 
+
+    # This needs to be refactored but I don't have time to do it right now.
     def generate_property_body(self, prop_name, prop_type, prop_value, prop_value2 = None, annotation = None): # Should have been named generate_body_property, will fix in future.
 
         type_dict = {
@@ -475,72 +479,70 @@ class NotionApiHelper:
         return type_dict[prop_type]
     
     def return_property_value(self, property, id):
-        def is_simple(data, prop_type):
-            print(f"Simple Data: {data}")
+        def is_simple(data, prop_type, id):
             return data[prop_type]
         
-        def is_uid(data, prop_type):
+        def is_uid(data, prop_type, id):
             return data[prop_type]['prefix'] + data[prop_type]['number']
         
-        def is_selstat(data, prop_type):
+        def is_selstat(data, prop_type, id):
             return data[prop_type]['name']
         
-        def is_formula(data, prop_type):
+        def is_formula(data, prop_type, id):
             form_type = data[prop_type]['type']
             if form_type == "date":
                 return is_date(data[prop_type], form_type)
             else:
                 return data[prop_type][form_type]     
         
-        def is_rich_text(data, prop_type):
+        def is_rich_text(data, prop_type, id):
             text_list = []
             for text in data[prop_type]:
                 text_list.append(text['plain_text'])
-            return ", ".join(text_list)
+            return "".join(text_list)
         
-        def is_relation(data, prop_type):
-            print(f"Relation data: {data}")
+        def is_relation(data, prop_type, id):
             package = []
             if "has_more" in data:
                 if data["has_more"]: # If there are more than 25 relations, replace data with full data (up to 100).
-                    print(f"Gathering full relation data for {prop_type}")
+                    print(f"Gathering full relation data for {prop_type}.")
                     response = self.get_page_property(id, data['id'])
-                    data[prop_type] = response[prop_type]
+                    data = response['results']
+                    for item in data:
+                        package.append(item['relation']['id'].replace('-', ''))
+                    return package
             
-            for id in data[prop_type]:
-                package.append(id['id'])
+            for relation_id in data[prop_type]:
+                package.append(relation_id['id'].replace('-', ''))
                 
             return package
         
-        def is_date(data, prop_type):
+        def is_date(data, prop_type, id):
             return data[prop_type]['start']
         
-        def is_files(data, prop_type):
+        def is_files(data, prop_type, id):
             file_list = []
             for file in data[prop_type]:
                 file_list.append(file['external']['url'])
             return file_list
         
-        def is_person(data, prop_type):
+        def is_person(data, prop_type, id):
             return data[prop_type]['id']
         
-        def is_multi_select(data, prop_type):
+        def is_multi_select(data, prop_type, id):
             package = []
             for select in data[prop_type]:
                 package.append(select['name'])
             return package
         
-        def is_rollup(data, prop_type):
+        def is_rollup(data, prop_type, id):
             roll_type = data[prop_type]['type']
-            print(f"Rollup Type: {roll_type}")
             if roll_type == "array":
-                print(f"Rollup Array: {data[prop_type]['array']}")
                 return_list = []
                 for each in data[prop_type]['array']:
                     return_list.append(self.return_property_value(each, id))
                 return return_list
             else:
-                print(f"Rollup Value: {data[prop_type][roll_type]}")
                 return data[prop_type][roll_type]
         
         router = { # This is a dictionary of functions that return the data in the correct format.
@@ -568,14 +570,11 @@ class NotionApiHelper:
         }
         try:
             prop_type = property['type']
-            print(f"Property Data: {property}")
-            print(f"Property Type: {prop_type}")
             for key, check_router in router.items():
                 if key == prop_type:
-                    value = check_router(property, prop_type)
-                    print(f"Found value: {value}")
+                    value = check_router(property, prop_type, id)
             return value
         except Exception as e:
-            print(f"Error returning property value: {e}")
+            print(f"Error returning property value: {property['type']:}{e}")
             logging.error(f"Error returning property value: {e}")
             return None
