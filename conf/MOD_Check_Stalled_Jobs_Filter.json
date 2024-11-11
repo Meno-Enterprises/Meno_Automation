@@ -1,0 +1,80 @@
+{
+    "and": [
+        {
+            "property": "Missing_Nest",
+            "checkbox": {
+                "equals": true
+            }
+        },
+        {
+            "and": [
+                {
+                    "property": "Job status",
+                    "select": {
+                        "does_not_equal": "Production"
+                    }
+                },
+                {
+                    "property": "Job status",
+                    "select": {
+                        "does_not_equal": "Complete"
+                    }
+                },
+                {
+                    "property": "Job status",
+                    "select": {
+                        "does_not_equal": "Canceled"
+                    }
+                },
+                {
+                    "property": "Job status",
+                    "select": {
+                        "does_not_equal": "Packout"
+                    }
+                },
+                {
+                    "property": "Job status",
+                    "select": {
+                        "is_not_empty": true
+                    }
+                }
+            ]
+        },
+        {
+            "property": "Order status",
+            "rollup": {
+                "every": {
+                    "select": {
+                        "does_not_equal": "Canceled"
+                    }
+                }
+            }
+        },
+        {
+            "property": "Order status",
+            "rollup": {
+                "every": {
+                    "select": {
+                        "does_not_equal": "Invoiced"
+                    }
+                }
+            }
+        },
+        {
+            "property": "Order status",
+            "rollup": {
+                "every": {
+                    "select": {
+                        "does_not_equal": "Shipped"
+                    }
+                }
+            }
+        },
+        {
+            "property": "System status",
+            "select": {
+                "equals": "Active"
+            }
+        }
+    ]
+}
