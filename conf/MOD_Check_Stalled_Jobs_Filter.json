@@ -7,38 +7,10 @@
             }
         },
         {
-            "and": [
-                {
-                    "property": "Job status",
-                    "select": {
-                        "does_not_equal": "Production"
-                    }
-                },
-                {
-                    "property": "Job status",
-                    "select": {
-                        "does_not_equal": "Complete"
-                    }
-                },
-                {
-                    "property": "Job status",
-                    "select": {
-                        "does_not_equal": "Canceled"
-                    }
-                },
-                {
-                    "property": "Job status",
-                    "select": {
-                        "does_not_equal": "Packout"
-                    }
-                },
-                {
-                    "property": "Job status",
-                    "select": {
-                        "is_not_empty": true
-                    }
-                }
-            ]
+            "property": "Job status",
+            "select": {
+                "equals": "Nest"
+            }
         },
         {
             "property": "Order status",

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 '''
 Aria Corona
-Nov. 7th, 2024
+Nov. 8th, 2024
 
 CalderaPullPush.py
 This script is designed to interact with the Caldera RIP software and Notion API to manage and update print job data.
@@ -65,12 +65,16 @@ IP1 = '192.168.0.90' # Secondary Dell PC IP
 IP2 = '192.168.0.134' # Temporary PC for Epson F
 # ip2 = '192.168.0.151'  # Alienware, currently not relevant
 
+ACTIVE_PRINTERS = [(ID_PRINTER_1, IP1), (ID_PRINTER_2, IP1), (ID_PRINTER_3, IP2)]
+
 URL_PRINTER_1 = 'http://' + IP1 + ':12340/v1/jobs?idents.device=' + ID_PRINTER_1 + '&name=Autonest*&sort=idents.internal' \
                                                                                ':desc&state=finished&limit=15'
 URL_PRINTER_2 = 'http://' + IP1 + ':12340/v1/jobs?idents.device=' + ID_PRINTER_2 + '&name=Autonest*&sort=idents.internal' \
                                                                                ':desc&state=finished&limit=15'
 URL_PRINTER_3 = 'http://' + IP2 + ':12340/v1/jobs?idents.device=' + ID_PRINTER_3 + '&name=Autonest*&sort=idents.internal' \
                                                                                ':desc&state=finished&limit=15'
+                                                                               
+URL_DEVICE = 'http://#IPADDRESS#:12340/v1/devices/'                                                        
 
 NEST_DB_ID = '36f1f2e349e147a69468af461c31ab00'
 NEST_DB_FILTER = {"timestamp": "created_time", "created_time": {"past_week": {}}}
@@ -253,7 +257,11 @@ def process_data(data, nest_db_data):
 
     # Early exit if the query returns None for some reason.
     if nest_db_data is None:
-        logger.error("No nest database data returned from Notion.")
+        logger.info("No nest database data returned from Notion.")
+        return
+    
+    if data is None:
+        logger.info("No data returned from Caldera.")
         return
     
     # Iterate through each page in the Caldera data.
@@ -364,7 +372,7 @@ def getRequest(urlRequest):
     
     try:
         getReq = requests.get(urlRequest)
-        logger.info(f"getRequest(): {getReq.status_code}")
+        logger.info(f"getRequest(): {getReq.status_code}, {urlRequest}")
         getReq.raise_for_status()
     except Exception as e:
         logger.error(f'getRequest(): {e}')
@@ -372,6 +380,63 @@ def getRequest(urlRequest):
     
     return getReq
 
+def putRequest(urlRequest, body):
+    """
+    Sends a PUT request to the specified URL with the given body.
+    Args:
+        urlRequest (str): The URL to which the PUT request is sent.
+        body (dict): The JSON body to be sent with the PUT request.
+    Returns:
+        requests.Response: The response object from the PUT request if successful.
+        None: If an exception occurs during the request.
+    Logs:
+        Logs the status code of the response if the request is successful.
+        Logs the exception message if an error occurs.
+    """
+    
+    putReq = []
+    
+    try:
+        putReq = requests.put(urlRequest, json=body)
+        logger.info(f"putRequest(): {putReq.status_code}")
+        putReq.raise_for_status()
+    except Exception as e:
+        logger.error(f'putRequest(): {e}')
+
+def check_inactive_printers():
+    """
+    Checks the status of printers in the ACTIVE_PRINTERS list. For each printer, it sends a GET request to the 
+    corresponding endpoint to retrieve its status. If the printer is not running, it logs an info message and 
+    sends a PUT request to change the printer's state to 'running'.
+    The function performs the following steps:
+    1. Iterates over each printer in the ACTIVE_PRINTERS list.
+    2. Replaces the placeholder in the URL_DEVICE with the printer's IP address.
+    3. Sends a GET request to the endpoint to get the printer's status.
+    4. Checks if the response contains an 'id' that matches the printer's ID.
+    5. If the printer's status is not 'running', logs an info message and sends a PUT request to update the printer's state.
+    Note:
+    - ACTIVE_PRINTERS is expected to be a list of tuples, where each tuple contains the printer's ID and IP address.
+    - URL_DEVICE is a string containing the endpoint URL with a placeholder for the IP address.
+    - getRequest and putRequest are functions used to send GET and PUT requests, respectively.
+    - logger is used to log information messages.
+    """
+    
+    for printer in ACTIVE_PRINTERS:
+        endpoint = URL_DEVICE.replace("#IPADDRESS#", printer[1])
+        response = getRequest(endpoint)
+        
+        if response is None:
+            continue
+        
+        for each in response.json():
+            if 'id' in each:
+                if each['id'] == printer[0]:
+                    if each['state'] != 'running':
+                        logger.info(f"Starting printer {printer[0]}.")
+                        putRequest(f"{endpoint}/{printer[0]}/state", "running")
+                    else:
+                        logger.info(f"Printer {printer[0]}: State: {each['state']}")
+    
 
 def pullPush(urlPrinter, lastPull, nest_db_data):
     """
@@ -406,6 +471,7 @@ gc.enable()
 
 while True:
     nest_db_data = notion_helper.query(NEST_DB_ID, content_filter=NEST_DB_FILTER)
+    check_inactive_printers()
     
     logger.info(f"Getting Data: {ID_PRINTER_2}")
     pullStore2 = pullPush(URL_PRINTER_2, pullStore2, nest_db_data) 

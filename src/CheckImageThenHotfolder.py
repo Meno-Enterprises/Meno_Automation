@@ -16,7 +16,6 @@ import warnings
 '''
 Dependencies:
     pip install pillow
-    pip install watchdog
     pip install cronitor
     NotionApiHelper.py
     AutomatedEmails.py
@@ -687,7 +686,7 @@ if __name__ == "__main__":
             if tick % GC_CYCLE == 0:
                 gc.collect()
                 tick = 0
-                  
+            
             now = time.strftime('%H:%M:%S')
             if now >= STOP_TIME:
                 print(f"Time is after {STOP_TIME} EST. Stopping the observer.")
