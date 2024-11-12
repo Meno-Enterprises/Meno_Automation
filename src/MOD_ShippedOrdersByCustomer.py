@@ -125,10 +125,12 @@ for page in order_notion_response: # Iterating through Orders to find Shipped Or
         shipping_id = page["properties"]["Shipping ID"]["rich_text"][0]["plain_text"] if page["properties"]["Shipping ID"]["rich_text"] else ""
         full_order_number = page["properties"]["Order"]["title"][0]["plain_text"]
         customer_notion_id = page["properties"]["Customer"]["relation"][0]["id"]
+        
         if customer_name not in customer_list:
             customer_list.append(customer_name)
             print(f"New customer found: {customer_name}")
             preflight_perms = notion_helper.get_page_property(customer_notion_id, r"I%3E%7Cy")
+            
             try:
                 customer_preflight_approval = preflight_perms['select']['name']
                 allow_alter = int(customer_preflight_approval[0])
@@ -136,10 +138,13 @@ for page in order_notion_response: # Iterating through Orders to find Shipped Or
             except:
                 print(f"Error getting preflight approval for customer {customer_name}. Defaulting to 0.")
                 preflight_customer_perms[customer_name] = 0
+                
         for id in jobs_relation_property:   # Iterating through Jobs in the Order
             job_page_id = id["id"]
             print(f"Processing job {job_page_id} for order {order_number}")
+            
             if job_page_id in job_dict and status == "Shipped": # Only processing Shipped Orders, also checks to make sure the job exists.
+                
                 if order_number not in output_dict: # New Order Number, adding to output_dict
                     output_dict[order_number] = {    
                         job_dict[job_page_id]["Line Item"]: {
@@ -153,6 +158,7 @@ for page in order_notion_response: # Iterating through Orders to find Shipped Or
                             "Tracking": tracking
                         }
                     }
+                    
                     if shipping_cost > 0:   # Adding Shipping Charge to output_dict
                         output_dict[order_number][f"SHIP_CHG_{order_number}"] = {    # Adding Shipping Charge to output_dict
                             "Product ID": "Shipping Charge",
@@ -164,7 +170,9 @@ for page in order_notion_response: # Iterating through Orders to find Shipped Or
                             "Shipping Method": shipping_method,
                             "Tracking": tracking
                         }
+                        
                         print(f"Shipping charge found for order {order_number}: {shipping_cost}")
+                        
                         if customer_name in customer_first_party_ship:
                             if customer_first_party_ship[customer_name] == 1:
                                 if order_number not in first_party_output_dict:
@@ -177,12 +185,14 @@ for page in order_notion_response: # Iterating through Orders to find Shipped Or
                                         "Shipping Charge": (shipping_cost * 1.25),
                                         "Shipstation ID": shipping_id
                                     }
+                                    
                                     print(f"New first party order found: {order_number}")
 
                     output_key_list.append(order_number)
                     order_id_list.append(page['id'])
                     print(f"New order found: {order_number}")
                     print(f"New line item found for order {order_number}: {job_dict[job_page_id]['Line Item']}")
+                    
                 else:   # Existing Order Number
                     output_dict[order_number][job_dict[job_page_id]["Line Item"]] = {    # New line item for existing Order Number, adding to output_dict
                         "Product ID": job_dict[job_page_id]["Product ID"],
@@ -194,19 +204,26 @@ for page in order_notion_response: # Iterating through Orders to find Shipped Or
                         "Shipping Method": shipping_method,
                         "Tracking": tracking
                     }
+                    
                     print(f"New line item found for order {order_number}: {job_dict[job_page_id]['Line Item']}")
+                    
     except Exception as e:
         print(f"Error processing order ORD-{oid}: {e}")
         errored_orders.append(oid)
     
 for customer in customer_list: # Creating a list of jobs for each customer.
+    
     csv_file_name = os.path.join(csv_directory, f"MOD_ShippedOrders_{customer}_{datetime.now().strftime('%Y-%m-%d')}.csv")
     file_list.append(csv_file_name)
+    
     with open(csv_file_name, mode='w', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(["Ship Date", "Order number", "Line Item", "Product", "Description", "Quantity", "Cost", "Shipping Method", "Tracking"])
+        
         for key in output_dict: # Iterates through each order number in output_dict
+            
             for line_item in output_dict[key]: # Iterates through each line item in the order number
+                
                 if output_dict[key][line_item]["Customer Name"] == customer:
                     csv_writer.writerow([
                         output_dict[key][line_item]["Shipped Date"],
@@ -219,14 +236,19 @@ for customer in customer_list: # Creating a list of jobs for each customer.
                         output_dict[key][line_item]["Shipping Method"],
                         output_dict[key][line_item]["Tracking"]
                     ])
+                    
         if preflight_customer_perms[customer] == 1:
             csv_writer.writerow(["","","","PREFLIGHT_AUTOSIZE", "Preflighting Image Correction Fee", 1, "$75.00","",""])
+            
         if preflight_customer_perms[customer] == 2:
             csv_writer.writerow(["","","","PREFLIGHT_CHECK", "Preflighting Image Check Fee", 1, "$49.00","",""])
+            
     print(f"CSV written successfully as {csv_file_name}")
 
 csv_file_name = os.path.join(csv_directory, f"MOD_FirstPartyOrders_{datetime.now().strftime('%Y-%m-%d')}.csv")
+
 file_list_2.append(csv_file_name)
+
 with open(csv_file_name, mode='w', newline='') as csv_file:
     csv_writer = csv.writer(csv_file)
     csv_writer.writerow(["Ship Date", "Order number", "Pieces", "Shipstation ID", "Shipping Method", "Shipping Cost"])
@@ -239,15 +261,18 @@ with open(csv_file_name, mode='w', newline='') as csv_file:
             first_party_output_dict[key]["Shipping Method"],
             "${:,.2f}".format(first_party_output_dict[key]["Shipping Charge"])
         ])
+        
 print(f"CSV written successfully as {csv_file_name}")
 
 print("Errored Jobs:\n", errored_jobs)
 print("Errored Orders:\n", errored_orders)
 print("Preparing to send shipped orders email...")
+
 automated_emails = AutomatedEmails()
 email_config_path = "conf/MOD_ShippedSKUsByCustomer_Email_Conf.json"
 subject = f"MOD Shipped Orders by Customer {datetime.now().strftime('%m-%d-%Y')}"
 body = "Attached are the shipped orders for each customer for Meno On-Demand.\n\n\n\nThis is an automated email being sent by the MOD Shipped Orders by Customer script. Please do not reply to this email. If you have any questions or concerns, please contact Aria Corona directly at acorona@menoenterprises.com."
+
 automated_emails.send_email(email_config_path, subject, body, file_list)
 
 print("Preparing to send first party orders email...")
