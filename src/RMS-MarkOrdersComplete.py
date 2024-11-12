@@ -107,14 +107,12 @@ def process_shipment_item(item_data):
 if __name__ == "__main__":
     shipment_id = catch_variable()
     shipment_data = get_page_info(shipment_id)
-    print(shipment_data)
     
     if notion_helper.return_property_value(shipment_data['properties']['Invoiced'], shipment_data['id']) == False:
         logger.info("Shipment is not marked invoiced. Exiting.")
         sys.exit(1)
         
     item_ids = get_property(shipment_data, "Shipment Items")
-    print(item_ids)
     
     for id in item_ids:
         item_data = notion_helper.get_page(id)
