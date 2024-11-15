@@ -434,6 +434,11 @@ class HotfolderHandler():
                 self.process_new_file(old_path)
                 return None
 
+        if " (1)" in file_path: # If the file is a duplicate, remove it.
+            print(f"File {file_path} is a duplicate. Removing.")
+            self.remove_file(file_path)
+            return None
+
         allow_alter = 0
         now = time.strftime('%Y-%m-%d %H:%M:%S')
         print(f"{now} - Processing file: {file_path}")
