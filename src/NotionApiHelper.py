@@ -331,7 +331,7 @@ class NotionApiHelper:
             print("Sending patch request...")
             print(f"{self.endPoint}/pages/{pageID}")
             response = requests.patch(f"{self.endPoint}/pages/{pageID}", headers=self.headers, json=jsonBody)
-            # print(response.text)
+            print(response.status_code)
             response.raise_for_status()
             self.counter = 0
             return response.json()
