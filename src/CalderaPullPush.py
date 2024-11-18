@@ -45,14 +45,13 @@ Execution:
 '''
 
 
-import gc, requests, time, cronitor, re, logging
+import gc, requests, time, cronitor, re, logging, os
 from NotionApiHelper import NotionApiHelper
 from datetime import datetime
 
 STOP_TIME = ('23:52:00', '23:54:59') # Time window to stop the script
 ID_REGEX = r'^.*_(\w*)__\d*\.'
 PULL_TIMER = 60  # seconds
-WEBHOOK_URL = ''
 
 # idPrinter1 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1B'  # Epson A
 # idPrinter2 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1C'  # Epson B
@@ -90,8 +89,16 @@ with open("conf/Cronitor_API_Key.txt") as file:
 cronitor.api_key = cronitor_api_key
 MONITOR = cronitor.Monitor('Debian10C104 MOD-Caldera API Listener')
 
+LOG_DIR = "logs"
+log_path = os.path.join(LOG_DIR, "CalderaPullPush.log")
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+file_handler = logging.FileHandler(log_path)
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+logger.addHandler(file_handler)
 
 notion_helper = NotionApiHelper()
 
@@ -135,7 +142,7 @@ def catch_value(page, key):
         
     return value
 
-def check_for_nest(name, device, creation, nest_db_data):
+def check_for_nest(name, device, caldera_id, nest_db_data):
     """
     Checks for a nest in the provided Notion database data.
     Args:
@@ -146,57 +153,96 @@ def check_for_nest(name, device, creation, nest_db_data):
         tuple: A tuple containing the page ID, jobs list, and reprints list if the nest is found.
                Returns (None, None, None) if the nest is not found.
     """
+    def _get_rest(url, id):
+        """
+        Recursively retrieves data from a REST API endpoint.
+        Args:
+            url (str): The URL of the REST API endpoint.
+            id (str): The identifier used to fetch the property from the URL.
+        Returns:
+            list: A list of results retrieved from the REST API.
+            None: If the response status code is not 200.
+        """
+        new_response = notion_helper.get_url_property(url, id)
+        
+        if 'has_more' in new_response:
+            if new_response['has_more']:
+                new_response += _get_rest(new_response['property_item']['next_url'], id)
+                
+                if new_response.status_code != 200:
+                    return None
+                
+                if 'results' in new_response:
+                    return new_response['results']
+                
+        return new_response['results']
     
+    def _get_results(property, page_id):
+        """
+        Retrieve results for a given property and page ID from the Notion API.
+        Args:
+            property (dict): The property dictionary containing the property ID.
+            page_id (str): The ID of the page to retrieve the property from.
+        Returns:
+            list: A list of results retrieved from the Notion API.
+            None: If the response status code is not 200 or if there are no results.
+        """
+        response = notion_helper.get_page_property(page_id, property['id'])
+        
+        if response is None:
+            return None
+        
+        results = response['results']
+        
+        if 'has_more' in response:
+            if response['has_more']:
+                results += _get_rest(response['property_item']['next_url'], property['id'])
+        
+        return results
+        
+    # Iterate through each page in the Notion database data.
     for page in nest_db_data:
         page_id = catch_value(page, 'id').replace('-', '')
         properties = catch_value(page, 'properties')
         
-        
-        if all(key in properties for key in ['Name', 'Device ID', 'Nest Creation Time']):
+        # Check if the Name and Device ID properties exist in the page.
+        if all(key in properties for key in ['Name', 'Device ID']):
             nest_name = notion_helper.return_property_value(properties['Name'], page_id)
             device_id = notion_helper.return_property_value(properties['Device ID'], page_id)
-            notion_nest_creation_time = notion_helper.return_property_value(properties['Nest Creation Time'], page_id)
             
-            if nest_name == name and device_id == device and notion_nest_creation_time == creation:
+            # Check if the nest name and device ID match the provided values.
+            if nest_name == name and device_id == device:
+                logger.info(f"{nest_name}:{name}, {device_id}:{device}")
+                
+                # Check for the Jobs and Reprints properties in the page.
                 if all(key in properties for key in ['Jobs', 'Reprints']):
-                    jobs_list = notion_helper.return_property_value(properties['Jobs'], page_id)
-                    reprints_list = notion_helper.return_property_value(properties['Reprints'], page_id)
+                    jobs_list = _get_results(properties['Jobs'], page_id)
+                    reprints_list = _get_results(properties['Reprints'], page_id)
+                    
                     logger.info(f"check_for_nest(): Found Nest {name} in Notion.")
+                    print(f"check_for_nest() - Jobs: {jobs_list}\nRep: {reprints_list}")
+                    
                 return page_id, jobs_list, reprints_list, True
         
     return None, None, None, False
 
 def check_id_list(caldera_list, notion_list, update_check):
-    """
-    Compares two lists of IDs and updates the check list and update flag.
-    This function takes two lists of IDs, `caldera_list` and `notion_list`, and checks if there are any IDs in 
-    `caldera_list` that are not present in `notion_list`. If such IDs are found, they are added to the `check_list` 
-    and the `update_check` flag is set to True.
-    Args:
-        caldera_list (list): List of IDs from Caldera.
-        notion_list (list): List of IDs from Notion.
-        update_check (bool): A flag indicating whether an update is needed.
-    Returns:
-        tuple: A tuple containing the updated check list and the update flag.
-    """
-    
-    check_list = []
-    
     if notion_list:
         logger.info(f"check_id_list(): Notion list exists.")
-        check_list = notion_list.copy()
-        
+    else:
+        logger.info(f"check_id_list(): Notion list does not exist.")
+        notion_list = []
+
     if caldera_list:
         logger.info(f"check_id_list(): Caldera list exists.")
         
         for id in caldera_list:
-            if id not in notion_list:
-                check_list.append(id)
-                update_check = True
+            if id in notion_list:
+                return caldera_list, False
+        
+        return caldera_list, True
                
-    logger.info(f"check_id_list(): Returning {check_list}")
-    
-    return check_list, update_check
+    return caldera_list, update_check
             
 def relation_packer(id_list, prop_name, package):
     """
@@ -263,6 +309,29 @@ def process_overlimit_relation(job_list, reprint_list, page_id):
         logger.logging(f"Updated Nest {page_id} with additional relations.\nStatus Code: {response['status_code']}")
     pass
 
+def fix_list(list):
+    print(f"fix_list() - List: {list}")
+    
+    if list is None or list is []:
+        return []
+
+    elif any('relation' in item for item in list):
+        unpacked_list = []
+        
+        for relation in list:
+            unpacked_list.append(relation['id'].replace('-', ''))
+            
+        return unpacked_list
+    
+    else:
+        fixed_list = []
+        
+        for item in list:
+            fixed_list.append(item.replace('-', ''))
+        
+        return fixed_list
+
+
 def process_data(data, nest_db_data):
     """
     Processes the given Caldera data and updates or creates corresponding entries in Notion.
@@ -314,31 +383,46 @@ def process_data(data, nest_db_data):
         device = catch_value(idents, 'device')
         caldera_nest_id = catch_value(nest, 'id')
         evolution = catch_value(form, 'evolution')
-        creation = catch_value(evolution, 'creation')
+        creation = catch_value(evolution, 'creation')        
         
         # Checks notion for nest data
-        nest_notion_id, nest_notion_jobs_list, nest_notion_reprints_list, has_creation = check_for_nest(name, device, str(creation), nest_db_data)
+        nest_page_id, nest_notion_jobs_list, nest_notion_reprints_list, matches_internal = check_for_nest(name, device, str(idents_internal), nest_db_data)
         
+        # Remove the hyphens from the IDs in the lists.
+        nest_notion_jobs_list = fix_list(nest_notion_jobs_list)
+        nest_notion_reprints_list = fix_list(nest_notion_reprints_list)
+               
         # Create a list of database IDs from the filenames in the Nest.
         for rip_file in input:
             file = catch_value(rip_file, 'file')
-            db_id = parse_filename(file)
+            db_id = parse_filename(file).replace('-', '')
             
             if db_id:
                 if 'REP-' in file:
                     caldera_rep_id_list.append(db_id)
                 if 'JOB-' in file:
                     caldera_job_id_list.append(db_id)
+                    
+        if caldera_rep_id_list is None and caldera_job_id_list is None:
+            logger.info(f"No files found for Nest {name}.")
+            continue
 
         # Nest exists in Notion, checks that all the job relations have been added to the nest in Notion.
-        if nest_notion_id and (nest_notion_jobs_list or nest_notion_reprints_list) and has_creation:
+        logger.info(f"ID: {bool(nest_page_id)}, Jobs: {bool(nest_notion_jobs_list)}, Reprints: {bool(nest_notion_reprints_list)}, Matches: {matches_internal}")
+
+        if nest_page_id and (nest_notion_jobs_list or nest_notion_reprints_list) and matches_internal:
             logger.info(f"Nest {name} exists in Notion, comparing ID lists.")
             create_notion_page = False
-            update_notion_page = False
+            update_notion_page = False   
             
-            # Check if the job and reprint nest lists match the lists in Notion. Changes the update flag if needed.
+            # Check if the job and reprint nest lists contain a match in Notion. Changes the update flag if needed.
             jobs_list_to_send, update_notion_page = check_id_list(caldera_job_id_list, nest_notion_jobs_list, update_notion_page)
-            reps_list_to_send, update_notion_page = check_id_list(caldera_rep_id_list, nest_notion_reprints_list, update_notion_page)
+            if not update_notion_page:
+                reps_list_to_send, update_notion_page = check_id_list(caldera_rep_id_list, nest_notion_reprints_list, update_notion_page)
+            else:
+                reps_list_to_send = caldera_rep_id_list
+
+            logger.info(f" ------------------------------------\n{name}\nJobs: {jobs_list_to_send}\nReprints: {reps_list_to_send}\n ------------------------------------")
         
         # Nest does not exist in Notion, set variables to create a new page.
         else:
@@ -347,40 +431,47 @@ def process_data(data, nest_db_data):
             update_notion_page = False
             jobs_list_to_send = caldera_job_id_list
             reps_list_to_send = caldera_rep_id_list
+            logger.info(f" ------------------------------------\n{name}\nJobs: {jobs_list_to_send}\nReprints: {reps_list_to_send}\n ------------------------------------")
           
         # Create the json body to send to Notion.
         if update_notion_page or create_notion_page:
-            oversided_relation = False
+            oversized_relation = False
             logger.info(f"Creating package for Nest {name}.")
             package = {}
             
+            # If the relation lists are over 100 items, split them into multiple packages.
             if len(jobs_list_to_send) > 100 or len(reps_list_to_send) > 100:
-                oversides_relation = True
+                oversized_relation = True
                 whole_jobs_list = jobs_list_to_send.copy()
                 whole_reps_list = reps_list_to_send.copy()
                 jobs_list_to_send = whole_jobs_list[:100]
                 reps_list_to_send = whole_reps_list[:100]
             
+            # Add the relation properties to the package.
             if jobs_list_to_send:
                 package = relation_packer(jobs_list_to_send, 'Jobs', package)
             if reps_list_to_send:
                 package = relation_packer(reps_list_to_send, 'Reprints', package)
-                
-            package = repacker('Nest', package, notion_helper.title_prop_gen('Nest', "title", [name]))
+            
+            # Add the remaining properties to the package.
             package = repacker('Caldera ID', package, notion_helper.rich_text_prop_gen('Caldera ID', "rich_text", [idents_internal]))
             package = repacker('Software service ID', package, 
                                notion_helper.rich_text_prop_gen('Software service ID', "rich_text", [idents_service]))
             package = repacker('Device ID', package, notion_helper.rich_text_prop_gen('Device ID', "rich_text", [device]))
             package = repacker('System status', package, notion_helper.selstat_prop_gen('System status', "select", 'Active'))
             package = repacker('Caldera Nest ID', package, notion_helper.rich_text_prop_gen('Caldera Nest ID', "rich_text", [caldera_nest_id]))
-            package = repacker('Print Status', package, notion_helper.selstat_prop_gen('Print Status', "select", 'Queued'))
+            
+            # If the nest is new, set the print status to 'Queued'.
+            if create_notion_page:
+                package = repacker('Print Status', package, notion_helper.selstat_prop_gen('Print Status', "select", 'Queued'))
+            
             package = repacker('Name', package, notion_helper.rich_text_prop_gen('Name', "rich_text", [name]))
             package = repacker('Nest Creation Time', package, notion_helper.rich_text_prop_gen('Nest Creation Time', "rich_text", [str(creation)]))
             
             # The nest exists in Notion, update the page.
             if update_notion_page:
-                response = notion_helper.update_page(nest_notion_id, package)
-                logger.info(f"Updated Nest {name}: {nest_notion_id}")
+                response = notion_helper.update_page(nest_page_id, package)
+                logger.info(f"Updated Nest {name}: {nest_page_id}")
             
             # The nest does not exist in Notion, create a new page.
             else:
@@ -388,7 +479,8 @@ def process_data(data, nest_db_data):
                 response = notion_helper.create_page(NEST_DB_ID, package)
                 logger.info(f"Created Nest {name}")
                 
-            if oversided_relation:
+            # If the relation lists are over 100 items, split them into multiple packages.
+            if oversized_relation:
                 process_overlimit_relation(whole_jobs_list, whole_reps_list, response['id'])
                     
         else:
