@@ -52,12 +52,14 @@ from datetime import datetime
 STOP_TIME = ('23:52:00', '23:54:59') # Time window to stop the script
 ID_REGEX = r'^.*_(\w*)__\d*\.'
 PULL_TIMER = 60  # seconds
+WEBHOOK_URL = ''
 
 # idPrinter1 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1B'  # Epson A
 # idPrinter2 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1C'  # Epson B
-ID_PRINTER_1 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1E' # Epson D
-ID_PRINTER_2 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1F' # Epson E
-ID_PRINTER_3 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1G' # Epson F
+ID_PRINTER_1 = 'TUhaRVNtVlNOMnRCYlVWNGF6MHRiR3c2ZHpNfkVwc29uLVN1cmVDb2xvci1GMTAwMDAtRA' # Epson D
+#ID_PRINTER_2 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1F' # Epson E
+ID_PRINTER_3 = 'T1ZSUU1WcDFVU1k2SmtWQ2VHSnNiR2hKVkc0fkVwc29uLVN1cmVDb2xvci1GMTAwMDAtRg' # Epson F
+ID_PRINTER_2 = 'TUhaRVNtVlNOMnRCYlVWNGF6MHRiR3c2ZHpNfkVwc29uLVN1cmVDb2xvci1GMTAwMDAtRTI'   # Epson E (newer)
 
 # ip1 = '192.168.0.39'  # Master Dell PC IP
 IP1 = '192.168.0.111' # Secondary Dell PC IP
@@ -198,6 +200,7 @@ def check_for_nest(name, device, caldera_id, nest_db_data):
             if response['has_more']:
                 results += _get_rest(response['property_item']['next_url'], property['id'])
         
+        logging.debug(f"_get_results(): {results}")
         return results
         
     # Iterate through each page in the Notion database data.
@@ -209,11 +212,19 @@ def check_for_nest(name, device, caldera_id, nest_db_data):
         if all(key in properties for key in ['Name', 'Device ID']):
             nest_name = notion_helper.return_property_value(properties['Name'], page_id)
             device_id = notion_helper.return_property_value(properties['Device ID'], page_id)
+            created = page['created_time']
+            print_status = notion_helper.return_property_value(properties['Print Status'], page_id)
+            
+            # Check if the nest was created more than a week ago.
+            created_date = datetime.strptime(created, '%Y-%m-%dT%H:%M:%S.%fZ')
+            if (datetime.now() - created_date).days > 4:
+                continue
+            
+            if print_status in ['Canceled']:
+                continue
             
             # Check if the nest name and device ID match the provided values.
             if nest_name == name and device_id == device:
-                logger.info(f"{nest_name}:{name}, {device_id}:{device}")
-                
                 # Check for the Jobs and Reprints properties in the page.
                 if all(key in properties for key in ['Jobs', 'Reprints']):
                     jobs_list = _get_results(properties['Jobs'], page_id)
@@ -260,6 +271,7 @@ def relation_packer(id_list, prop_name, package):
     
     if id_list:
         prop = notion_helper.relation_prop_gen(prop_name, "relation", id_list)
+        logging.info(f"relation_packer(): {prop}")
         package[prop_name] = prop[prop_name]
 
     else:
@@ -281,32 +293,56 @@ def repacker(prop_name, full_package, partial_package):
     full_package[prop_name] = partial_package[prop_name]
     return full_package
     
-def process_overlimit_relation(job_list, reprint_list, page_id):
+def process_overlimit_relation(job_list, reprint_list, nest_db_id, package, nest_name):
+    """
+    Processes overlimit relations by dividing the job and reprint lists into chunks and updating the package with these chunks.
+    Args:
+        job_list (list): List of jobs to be processed.
+        reprint_list (list): List of reprints to be processed.
+        nest_db_id (str): The database ID of the nest to be updated.
+        package (dict): The package dictionary to be updated with job and reprint relations.
+        nest_name (str): The name of the nest.
+    Returns:
+        None
+    """
+    
+    
     job_list_len = len(job_list)
     reprint_list_len = len(reprint_list)
     
     max_list_size = job_list_len if job_list_len >= reprint_list_len else reprint_list_len
-    
+    logging.info(f"process_overlimit_relation()\n Max List Size: {max_list_size}, Job List: {job_list_len}, Reprint List: {reprint_list_len}")
     for i in range(100, max_list_size, 100):
+        
+        time.sleep(.5)
+        index = (i/100)+1
+        package['Name'] = notion_helper.rich_text_prop_gen('Name', "rich_text", [f"{nest_name}-{str(index)}"])['Name']
+        
+        if 'Jobs' in package:
+            package.pop('Jobs')
+        if 'Reprints' in package:
+            package.pop('Reprints')
+        
+        logging.info(f"Package: {package}")
+        
         if i + 100 > job_list_len:
             jobs_list_to_send = job_list[i:]
         else:
             jobs_list_to_send = job_list[i:i+100]
-            
+
         if i + 100 > reprint_list_len:
             reps_list_to_send = reprint_list[i:]
         else:
             reps_list_to_send = reprint_list[i:i+100]
         
-        package = {}
-        
         if jobs_list_to_send:
             package = relation_packer(jobs_list_to_send, 'Jobs', package)
         if reps_list_to_send:
             package = relation_packer(reps_list_to_send, 'Reprints', package)
-        
-        response = notion_helper.update_page(page_id, package)
-        logger.logging(f"Updated Nest {page_id} with additional relations.\nStatus Code: {response['status_code']}")
+            
+        logging.debug(f"Package: {package}")
+        response = notion_helper.create_page(nest_db_id, package)
+        logger.info(f"Added new Nest {nest_db_id} with additional relations.")
     pass
 
 def fix_list(list):
@@ -383,7 +419,7 @@ def process_data(data, nest_db_data):
         device = catch_value(idents, 'device')
         caldera_nest_id = catch_value(nest, 'id')
         evolution = catch_value(form, 'evolution')
-        creation = catch_value(evolution, 'creation')        
+        creation = catch_value(evolution, 'creation')
         
         # Checks notion for nest data
         nest_page_id, nest_notion_jobs_list, nest_notion_reprints_list, matches_internal = check_for_nest(name, device, str(idents_internal), nest_db_data)
@@ -416,13 +452,13 @@ def process_data(data, nest_db_data):
             update_notion_page = False   
             
             # Check if the job and reprint nest lists contain a match in Notion. Changes the update flag if needed.
-            jobs_list_to_send, update_notion_page = check_id_list(caldera_job_id_list, nest_notion_jobs_list, update_notion_page)
-            if not update_notion_page:
-                reps_list_to_send, update_notion_page = check_id_list(caldera_rep_id_list, nest_notion_reprints_list, update_notion_page)
-            else:
-                reps_list_to_send = caldera_rep_id_list
+            #jobs_list_to_send, update_notion_page = check_id_list(caldera_job_id_list, nest_notion_jobs_list, update_notion_page)
+            #if not update_notion_page:
+            #    reps_list_to_send, update_notion_page = check_id_list(caldera_rep_id_list, nest_notion_reprints_list, update_notion_page)
+            #else:
+            #    reps_list_to_send = caldera_rep_id_list
 
-            logger.info(f" ------------------------------------\n{name}\nJobs: {jobs_list_to_send}\nReprints: {reps_list_to_send}\n ------------------------------------")
+#            logger.info(f" ------------------------------------\n{name}\nJobs: {jobs_list_to_send}\nReprints: {reps_list_to_send}\n ------------------------------------")
         
         # Nest does not exist in Notion, set variables to create a new page.
         else:
@@ -440,7 +476,7 @@ def process_data(data, nest_db_data):
             package = {}
             
             # If the relation lists are over 100 items, split them into multiple packages.
-            if len(jobs_list_to_send) > 100 or len(reps_list_to_send) > 100:
+            if len(jobs_list_to_send) >= 100 or len(reps_list_to_send) >= 100:
                 oversized_relation = True
                 whole_jobs_list = jobs_list_to_send.copy()
                 whole_reps_list = reps_list_to_send.copy()
@@ -470,7 +506,7 @@ def process_data(data, nest_db_data):
             
             # The nest exists in Notion, update the page.
             if update_notion_page:
-                response = notion_helper.update_page(nest_page_id, package)
+                #response = notion_helper.update_page(nest_page_id, package)
                 logger.info(f"Updated Nest {name}: {nest_page_id}")
             
             # The nest does not exist in Notion, create a new page.
@@ -481,7 +517,7 @@ def process_data(data, nest_db_data):
                 
             # If the relation lists are over 100 items, split them into multiple packages.
             if oversized_relation:
-                process_overlimit_relation(whole_jobs_list, whole_reps_list, response['id'])
+                process_overlimit_relation(whole_jobs_list, whole_reps_list, NEST_DB_ID, package, name)
                     
         else:
             logger.info(f"Nest {name} is already in Notion.")
