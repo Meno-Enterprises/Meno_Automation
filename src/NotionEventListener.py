@@ -56,21 +56,30 @@ with open(CRONITOR_KEY_PATH, "r") as file:
 cronitor.api_key = cronitor_api_key
 MONITOR = cronitor.Monitor("Notion Event Listener")
 
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.FileHandler('logs/NotionEventListener.log'),
+                        logging.StreamHandler()
+                    ])
+
 gc.enable() # Garbage Collection
 
-SLEEP_TIMER = 30 # Seconds
-PING_CYCLE = 100 # Number of loops before pinging cronitor.
-GC_CYCLE = 200 # Number of loops before running garbage collection.
-CONFIG_RELOAD_CYCLE = 20 # Number of loops before reloading the config file.
-STOP_CYCLE = 10000 # Number of loops before stopping the script.
+SLEEP_TIMER = 3 # Seconds
+PING_CYCLE = 15 # Number of loops before pinging cronitor.
+GC_CYCLE = 60 # Number of loops before running garbage collection.
+CONFIG_RELOAD_CYCLE = 5 # Number of loops before reloading the config file.
+END_WINDOW = ("22:52", "22:54")
 
 class NotionEventListener:
     def __init__(self):
+        
         self.notion_helper = NotionApiHelper()
         self.planet_helper = NotionApiHelper(header_path = "src/headers_pts.json")
         self.automated_emails = AutomatedEmails()
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+        
         self.logger = logging.getLogger(__name__)
+        
         self.STORAGE_DIRECTORY = "storage"
         self.CONFIG_PATH = "conf/NotionEventListener_Conf.json"
         self.EMAIL_ME_PATH = "conf/Aria_Email_Conf.json"
@@ -122,26 +131,26 @@ class NotionEventListener:
         start_time = datetime.now()
         for db_id in self.config:
             db_id = db_id.replace('-','') # Normalizing db ID now so it's not a problem again later.
-            print(f"Listening to database {db_id}")
+            #print(f"Listening to database {db_id}")
             filter_properties = []
             
             for db_config_page in self.config[db_id]: # Set up query property filters. Trying to do as few queries as possible to maximize efficiency.
-                print(f"Checking config page {db_config_page['uid']}")
+                #print(f"Checking config page {db_config_page['uid']}")
                 if 'base' in db_config_page:
                     self.base = db_config_page['base']
                 if 'filter_properties' in db_config_page:
-                    print(f"Filter properties found in config page {db_config_page['uid']}")
+                    #print(f"Filter properties found in config page {db_config_page['uid']}")
                     for property_id in db_config_page['filter_properties']:
-                        print(f"Adding property {property_id} to filter list.")
+                        #print(f"Adding property {property_id} to filter list.")
                         if property_id in filter_properties:
-                            print(f"Property {property_id} already in filter list.")
+                            #print(f"Property {property_id} already in filter list.")
                             continue
                         filter_properties.append(property_id)
             if filter_properties == []: # If no filter properties are found, set to None.
                 filter_properties = None
             
             active_properties = self.get_active_properties(db_id)
-            print(f"Listening to database {db_id}, with filter properties {filter_properties}")
+            self.logger.info(f"Listening to database {db_id}, with filter properties {filter_properties}")
             
             # Pull Content Filter from Config, defaults to self.query_filter if not found.
             if 'content_filter' in self.config[db_id]: 
@@ -151,51 +160,47 @@ class NotionEventListener:
             
             # Load previous query
             if not self.storage_exists(db_id) or self.first_run: # Storage does not exist, create it.
+                self.logger.info(f"Storage does not exist for database {db_id}.")
                 self.save_storage(db_id, self.query_database(db_id, filter_properties))
                 continue
             
             last_query = self.load_storage(db_id)
-            print("Previous query loaded.")
             
             # Query DB
             response = self.query_database(db_id, filter_properties, content_filter)
-            print("Database queried.")
-            
+
             # Skips if returned no response because of a network issue or something.
             if response is None:
-                print(f"No response from queried database: {db_id}.")
+                self.logger.error(f"No response from queried database: {db_id}.")
                 time.sleep(1)
                 continue
                 
-            print("Checking for changes.")
             difference = self.check_change(last_query, response, active_properties)
             
             # If no bulk changes detected, continue to next db.
             if difference == {}:
-                print(f"No changes detected in database {db_id}.")
+                self.logger.info(f"No changes detected in database {db_id}.")
                 time.sleep(.5)
                 continue
 
-            print(f"Difference: {json.dumps(difference, indent=4)}")
+            self.logger.info(f"Difference: {json.dumps(difference)}")
             
             for db_config_page in self.config[db_id]: # Check for triggers in the config file.
                 for page in difference: # Check for triggers in the difference.
                     activate_trigger = self.check_triggers(difference[page], db_config_page['trigger'])
-                    print(f" Active Trigger: {activate_trigger}")
+                    self.logger.info(f" Active Trigger: {activate_trigger}")
                     if activate_trigger: # If trigger is met, take action.
-                        print(f"Trigger met for page {page} in database {db_id}.")
+                        self.logger.info(f"Trigger met for page {page} in database {db_id}.")
                         
                         if 'action' in db_config_page: 
                             package = {page: difference[page]}
                             self.take_action(db_config_page['action'], package)
                             
                         else:
-                            print(f"No action found for page {page} in database {db_id}.")
+                            self.logger.error(f"No action found for page {page} in database {db_id}.")
             
-            print(f"Updating data storage for database {db_id}.")
             self.update_storage(db_id, response)
             time.sleep(5)
-            print("Database updated.")
             
         self.query_lookback_time = (datetime.now() - start_time).total_seconds() / 60 + 10 # Update lookback time based on how long the script has been running.
         self.first_run = False # Set first run to false after the first run.
@@ -230,7 +235,7 @@ class NotionEventListener:
                         active_properties.append(trigger['property'])
 
         if self.config[db_id] is None:
-            print(f"Database {db_id} not found in config.")
+            self.logger.error(f"Database {db_id} not found in config.")
             return []
 
         for conf in self.config[db_id]:
@@ -340,9 +345,10 @@ class NotionEventListener:
                     if property == config['property']:
                         try:
                             prop_type = data['property changed']['new property'][property]['type']
-                            print(f"Property: {property}, Type: {prop_type}")
-                            package = data['property changed']['new property'][property][prop_type]
-                            print(f"Package: {package}")
+                            self.logger.info(f"Property: {property}, Type: {prop_type}")
+                            prop_value = data['property changed']['new property'][property][prop_type]
+                            package = prop_value if prop_value else {}
+                            logging.info(f"Package: {package}")
                             router = { # This is a dictionary of functions that return the data in the correct format.
                                 'select': is_selstat,
                                 'status': is_selstat,
@@ -357,14 +363,17 @@ class NotionEventListener:
                             }
                             for key, check_router in router.items():
                                 if key == prop_type:
-                                    package = check_router(data, property, prop_type)
-                            print(f"Package: {package}")
+                                    package = check_router(data, property, prop_type) if prop_value else {}
+                            logging.info(f"Package: {package}")
                         except Exception as e:
-                            self.logger.error(f"Something in check_triggers failed: {property}\n{e}")
+                            self.logger.error(f"Something in check_triggers failed: {property}\n{e}", exc_info=True)
                             self.automated_emails.send_email(self.EMAIL_ME_PATH, "NotionEventListener:Error in check_triggers", f"Error in check_triggers: {property}\n{e}")
                             return False
-                        
-                        return self.trigger_compare(package, config[prop_type])  
+                        try:
+                            return self.trigger_compare(package, config[prop_type]) 
+                        except KeyError:
+                            form_type = data['property changed']['new property'][property][prop_type]["type"]
+                            return self.trigger_compare(package, config[form_type])
             else:
                 return False
                 
@@ -410,9 +419,9 @@ class NotionEventListener:
             ValueError: If the date format of the new property or config value is invalid.
         """
 
-        print(f"trigger_compare: {new_property}, {config}")
+        self.logger.info(f"trigger_compare: {new_property}, {config}")
         def date_convert(new_prop, config_prop=None): # Converts date strings to datetime objects.
-            print(f"date_convert: {new_prop}, {config_prop}")
+            self.logger.info(f"date_convert: {new_prop}, {config_prop}")
             try:
                 new_prop = datetime.fromisoformat(new_prop)
             except ValueError:
@@ -537,7 +546,7 @@ class NotionEventListener:
         
         for key, check_function in config_checks.items():
             if key in config:
-                print(f"@ key: {key}, check_function: {check_function}, new_property: {new_property}", f"config value: {config[key]}")
+                logging.info(f"@ key: {key}, check_function: {check_function}, new_property: {new_property}, config value: {config[key]}")
                 if key not in ['this_week', 'next_week', 'past_week', 'next_month', 'past_month', 'next_year', 'past_year', "is_empty", "is_not_empty"]:
                     return check_function(new_property, config[key])
                 else:
@@ -574,26 +583,24 @@ class NotionEventListener:
             }
 
         """
+        self.logger.info("Checking for changes in the data.")
+        
         old_dictionary = {}
         new_dictionary = {}
         changes = {}
-        print("Reformatting old data.")
+
         
         for page in old_data:
             old_dictionary[page['id'].replace('-','')] = page['properties']
-            
-        print("Reformatting new data.")
         
         for page in new_data:
             new_dictionary[page['id'].replace('-','')] = page['properties']
-            
-        print("Comparing...")
         
         for page_id in new_dictionary:
             print(f"Checking page {page_id}")
             
             if page_id not in old_dictionary:
-                print(f"New page detected: {page_id}")
+                self.logger.info(f"New page detected: {page_id}")
                 changes[page_id] = {"new page": page_id}
     
             else:
@@ -601,14 +608,14 @@ class NotionEventListener:
                     if property in active_properties:
                         if property in old_dictionary[page_id]:
                             if DeepDiff(old_dictionary[page_id][property], new_dictionary[page_id][property]) != {}:
-                                print(f"Property {property} changed in page {page_id}")
+                                self.logger.info(f"Property {property} changed in page {page_id}")
                                 if page_id not in changes:
                                     changes[page_id] = {'property changed': {'new property': {}, 'old property': {}}}
                                 changes[page_id]['property changed']['old property'][property] = old_dictionary[page_id][property]
                                 changes[page_id]['property changed']['new property'][property] = new_dictionary[page_id][property]
                                 
                         else:
-                            print(f"New property {property} detected in page {page_id}")
+                            self.logger.info(f"New property {property} detected in page {page_id}")
                             if page_id not in changes:
                                 changes[page_id] = {'property changed': {'new property': {}, 'old property': {}}}
                             changes[page_id]['property changed']['new property'][property] = new_dictionary[page_id][property]
@@ -643,18 +650,22 @@ class NotionEventListener:
         pass
 
     def load_config(self):
+        self.logger.info("Loading config file.")
         with open(self.CONFIG_PATH, 'r') as config_file:
             self.config = json.load(config_file)
 
     def save_config(self):
+        self.logger.info("Saving config file.")
         with open(self.CONFIG_PATH, 'w') as config_file:
             json.dump(self.config, config_file, indent=4)
 
     def load_storage(self, database_id):
+        self.logger.info(f"Loading data from storage for database {database_id}")
         with open(f"{self.STORAGE_DIRECTORY}/{database_id}.json", 'r') as storage_file:
             return json.load(storage_file)
 
     def save_storage(self, database_id, data):
+        self.logger.info(f"Saving data to storage for database {database_id}")
         with open(f"{self.STORAGE_DIRECTORY}/{database_id}.json", 'w') as storage_file:
             json.dump(data, storage_file, indent=4)
             
@@ -669,6 +680,7 @@ class NotionEventListener:
         Returns:
             None
         """
+        self.logger.info(f"Updating storage for database {database_id}")
         
         local_data = self.load_storage(database_id)
         page_index = {page['id']: page for page in data}
@@ -710,9 +722,7 @@ class NotionEventListener:
         self.save_config()
 
     def query_database(self, db_id, filter_properties = None, content_filter = None, pts = False):
-        print(f"Querying database {db_id}")
-        print(f"Filter properties: {filter_properties}")
-        print(f"Content filter: {content_filter}")
+        self.logger.info(f"Querying database {db_id}, filter properties: {filter_properties}\ncontent filter: {content_filter}")
         self.update_filter_time()
         
         if self.base == 'pts':
@@ -721,6 +731,7 @@ class NotionEventListener:
             return self.notion_helper.query(db_id, filter_properties, content_filter)
     
     def store_previous_query(self, data, db_id):
+        self.logger.info(f"Storing previous query for database {db_id}")
         with open(os.path.join(self.STORAGE_DIRECTORY, f"{db_id}.json"), 'w') as file:
             json.dump(data, file, indent=4)
         pass
@@ -729,9 +740,9 @@ class NotionEventListener:
         pass
 
     def notify_webhook(self, webhook_url, data = None):
-        print(f"Sending data to webhook: {webhook_url}")
+        self.logger.info(f"Sending data to webhook: {webhook_url}")
         headers = {'Content-Type': 'application/json'}
-        print(f"Data: {json.dumps(data)}")
+        self.logger.info(f"Data: {json.dumps(data)}")
         try:
             response = requests.post(webhook_url, headers=headers, data=json.dumps(data))
             response.raise_for_status()
@@ -746,14 +757,15 @@ class NotionEventListener:
     def start_script(self, script_path, data):
         if data:
             page_id = list(data.keys())[0]
+            self.logger.info(f"Starting script {script_path} for page {page_id}")
             
             try:
                 subprocess.Popen(['python', script_path, page_id])
-                logging.info(f"Script {script_path} started for page {page_id}")
+                self.logger.info(f"Script {script_path} started for page {page_id}")
             except Exception as e:
-                logging.error(f"Failed to start script {script_path} for page {page_id}: {e}")
+                self.logger.error(f"Failed to start script {script_path} for page {page_id}: {e}")
         else:
-            logging.error(f"No data provided to start script {script_path}")
+            self.logger.error(f"No data provided to start script {script_path}")
         pass
     
     def catch_variable(self):
@@ -761,7 +773,7 @@ class NotionEventListener:
             argument = sys.argv[1]
             if argument == "-S" or argument == "--skip_startup":
                 self.first_run = False
-                logging.info(f"Starting script without database initializing")
+                self.logger.info(f"Starting script without database initializing")
 
 
     
@@ -774,11 +786,14 @@ if __name__ == "__main__":
     MONITOR.ping(state='run')
 
     onoff = True
+
+    listener.logger.info("Starting Notion Event Listener")
+
     try:
         while onoff:
             counter += 1    
             listener.listen()
-            print(f"Sleeping...")
+            listener.logger.info(f"Sleeping...")
             time.sleep(SLEEP_TIMER)
             if counter % PING_CYCLE == 0:
                 MONITOR.ping()
@@ -786,6 +801,16 @@ if __name__ == "__main__":
                 gc.collect()
             if counter % CONFIG_RELOAD_CYCLE == 0:
                 listener.load_config()
+            if END_WINDOW[0] < datetime.now().strftime("%H:%M") < END_WINDOW[1]:
+                onoff = False
     except KeyboardInterrupt:
+        listener.logger.info("")
         MONITOR.ping(state='complete')
-        pass
+    except Exception as e:
+        listener.logger.error(f"Error in Notion Event Listener: {e}", exc_info=True)
+        listener.automated_emails.send_email(listener.EMAIL_ME_PATH, "NotionEventListener:Error", f"Error in Notion Event Listener: {e}")
+        MONITOR.ping(state='fail')
+        sys.exit(1)
+    
+    listener.logger.info("Stopping Notion Event Listener")
+    MONITOR.ping(state='complete')
