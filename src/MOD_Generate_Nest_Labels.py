@@ -30,7 +30,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 SERVICE_ACCOUNT_FILE = 'cred/green-campaign-438119-v8-17ab715c7730.json'
-SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+SCOPES = ['https://www.googleapis.com/auth/drive']
 
 gdrive_credentials = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE, scopes=SCOPES)
@@ -185,12 +185,16 @@ def update_nest_page_info(content_dict, label_dict, file_id):
     logger.info("Updating nest page info.")
     
     label_url = f"{FILE_VIEWER_URL.replace('#ID#', file_id)}"
+    logger.info(f"Label URL: {label_url}")
+    logging.info(json.dumps(content_dict))
     
     for jobrep in LIST_NAMES:
+        logger.info(f"Updating {jobrep} pages with label URL.")
         if jobrep in content_dict:
             for page in content_dict[jobrep]:
                 page_id = page['id']
                 
+                logger.info(f"Updating page {page_id} with label URL.")
                 if 'Label URL' not in page['properties']:
                     logger.error(f"Label URL property not found in page {page_id}.")
                     continue
@@ -230,7 +234,7 @@ def process_nest_content(nest_id, jobs, reprints):
         if list:
             # Create filter for each page_id in list, one query per db as opposed to one get request per page_id.
             for page_id in list:
-                filter_template = {'property': 'Notion record', 'formula': {'string': {'contains': page_id}}}
+                filter_template = {'property': 'Notion record', 'formula': {'string': {'contains': page_id.replace("-", "")}}}
                 content_filter['or'].append(filter_template)        
             
             # Get jobs or reprints page content
@@ -258,9 +262,9 @@ def generate_qr_code(qr_value, fill_color = 'black', back_color = 'white'):
     qr.make(fit=True)
     
     factory = qrcode.image.svg.SvgImage
+    qr_code_io = BytesIO()
     qr_code_image = qr.make_image(image_factory=factory, fill_color=fill_color, back_color=back_color)
-    
-    qr_code_io = save_image_to_memory(qr_code_image)
+    qr_code_image.save(qr_code_io)
     
     return qr_code_io
 
@@ -325,13 +329,13 @@ def upload_file_to_drive(file_io, file_name, mime_type, folder_id):
     )
     
     try:
-        file.execute()
+        response = file.execute()
     except Exception as e:
         logger.error(f"Error uploading file to Google Drive: {e}", exc_info=True)
         return None
     
-    logger.info(f"File ID: {file.get('id')}")
-    return file.get('id')
+    logger.info(f"File ID: {response.get('id')}")
+    return response.get('id')
 
 
 def process_jobrep_content(content_dict):
@@ -403,15 +407,16 @@ def process_jobrep_content(content_dict):
                 
                 try:
                     ship_date = notion.return_property_value(page_props['Ship date'], page_id)
-                except:
-                    ship_date = notion.return_property_value(page_props['Ship Date'], page_id)
                     
-                if ship_date:
+                    if not ship_date:
+                        ship_date = notion.return_property_value(page_props['Ship Date'], page_id)
+                        
                     single_label_dict['ship_date'] = datetime.datetime.strptime(
                         ship_date, '%Y-%m-%dT%H:%M:%S.%f%z').strftime('%m-%d-%Y')
-                else:
+                except Exception as e:
+                    logger.error(f"Error parsing ship date for page {page_id}: {e}", exc_info=True)
                     single_label_dict['ship_date'] = "--"
-                
+                    
                 single_label_dict['product_description'] = notion.return_property_value(
                     page_props['Product Description'], page_id)
                 
