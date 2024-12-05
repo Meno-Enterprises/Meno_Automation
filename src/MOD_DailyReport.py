@@ -39,7 +39,7 @@ TODAY = datetime.now(timezone.utc)
 automated_emails = AutomatedEmails()
 EMAIL_CONFIG_PATH = "conf/MOD_DailyReport_Email_Conf.json"
 SUBJECT = f"MOD Daily Report {datetime.now().strftime('%m-%d-%Y')}"
-body = "Please find the attached daily report for Meno On-Demand.\n\n\nThis is an automated email, please do not reply."
+BODY = "Please find the attached daily report for Meno On-Demand.\n\n\nThis is an automated email, please do not reply."
 
 JOB_DB_ID = "f11c954da24143acb6e2bf0254b64079"
 
@@ -178,7 +178,7 @@ def get_order_list(jobs_list):
         
         order_id = notion_helper.return_property_value(page_data['properties']['Order number'], id)
         ship_date = notion_helper.return_property_value(page_data['properties']['Ship date'], id)
-        customer = notion_helper.return_property_value(page_data['properties']['Customer'], id)
+        customer = notion_helper.return_property_value(page_data['properties']['Customer name'], id)
         products = notion_helper.return_property_value(page_data['properties']['Products'], id).replace(',',' ')
         
         order_id_list.append((order_id, ship_date, customer, products))
@@ -245,7 +245,7 @@ def main():
 
     write_csv(customer_dict, product_dict, status_count_dict, order_list, total_jobs, total_items)
     
-    #automated_emails.send_email(email_config_path, subject, body, [CSV_FILE_NAME])
+    automated_emails.send_email(EMAIL_CONFIG_PATH, SUBJECT, BODY, [CSV_FILE_NAME])
     
     print("End of script.") 
     
