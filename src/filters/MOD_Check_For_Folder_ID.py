@@ -22,14 +22,16 @@ import logging, sys, requests, datetime
 
 notion_helper = NotionApiHelper(header_path="src/headers.json")
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.FileHandler('logs/MOD_Check_For_Folder_ID.log'),
+                        logging.StreamHandler()
+                    ])
+
+# Create a logger for this module
 logger = logging.getLogger(__name__)
-file_handler = logging.FileHandler('logs/MOD_Check_For_Folder_ID.log')
-file_handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
-logger.propagate = False
 
 WEBHOOK_URL = "https://hook.us1.make.com/2waybxgtfc8utztl6dqi432go83iacj4"
 
