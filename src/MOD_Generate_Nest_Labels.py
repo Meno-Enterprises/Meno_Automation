@@ -37,23 +37,38 @@ gdrive_credentials = service_account.Credentials.from_service_account_file(
 
 drive_service = build('drive', 'v3', credentials=gdrive_credentials)
 
-LABEL_GEN_PACKAGE = {'Print Status': {'select': {'name': 'Label generating'}}}
+LABEL_GEN_PACKAGE = {'Print Status': {'select': {'name': 'Label generating'}}, 'Regenerate Trigger': {'number': 0}}
 LABEL_CREATED_PACKAGE = {'Print Status': {'select': {'name': 'Label created'}}}
 LABEL_ERROR_PACKAGE = {'System status': {'select': {'name': 'Error'}}}
 jobrep_label_url_package = {'Label Printed': {'select': {'name': 'Printed'}}, "Label URL": {'url': None}}
 
+# Names of the related properties that need to be checked for label information.
 LIST_NAMES = ['Jobs', 'Reprints']
 
 NEST_LOG_PROP_ID = "%3BNMV"
 
+# Notion database IDs.
 JOB_DB_ID = 'f11c954da24143acb6e2bf0254b64079'
 REPRINT_DB_ID = 'f631a4f09c27427dbe70f4d7a2e61e9c'
+
+# Google Drive folder IDs.
 THUMBNAIL_FOLDER_ID = '1hBeSlW4h56-BmygGdeNCeZF--1gTb9Zm'
 PDF_FOLDER_ID = '1HuAFqh8ITutdjSOBxo-qKU73ujVNFzMB'
 COPY_FOLDER_ID = '1BL6BxkJR7GV067DKk8z1-qXlnlOg4cTM'
 FILE_VIEWER_URL = 'https://drive.google.com/file/d/#ID#/view'
 
+EPSON_LIBRARY = {
+    'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1C': 'EPSON_B',
+    'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1E': 'EPSON_D',
+    'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1F': 'EPSON_E',
+    'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1G': 'EPSON_F'
+}
+
+
+# PDF generation constants.
 PDF_OUTPUT_PATH = 'output/mod/labels.pdf'
+NOTION_LOGO_PATH = 'assets/mod/generate_nest_labels/Notion_app_logo_thumbnail.png'
+SHIPSTATION_LOGO_PATH = 'assets/mod/generate_nest_labels/ShipStation_app_logo_thumbnail.png'
 INTERNAL_STORAGE_ID_REGEX = re.compile(r'\d*__(.*)')
 NEST_NAME_REGEX = re.compile(r'(\w*\s\#\d*)')
 
@@ -88,6 +103,10 @@ QR_CODE_MAX_SIZE = (floor(LABEL_HEIGHT * (2/5)), floor(LABEL_HEIGHT * (2/5))) # 
 QR_CODE_1_POS = (THUMBNAIL_MAX_SIZE[0], 0) 
 QR_CODE_2_POS = (LABEL_WIDTH - QR_CODE_MAX_SIZE[0], 0)
 
+LOGO_MAX_SIZE = (20, 20)
+NOTION_LOGO_POS = (QR_CODE_2_POS[0] - LOGO_MAX_SIZE[0] - PADDING, (QR_CODE_MAX_SIZE[1] - LOGO_MAX_SIZE[1]) / 2)
+SHIPSTATION_LOGO_POS = (QR_CODE_1_POS[0] + QR_CODE_MAX_SIZE[0] + PADDING, (QR_CODE_MAX_SIZE[1] - LOGO_MAX_SIZE[1]) / 2)
+
 ROW_NEST = (THUMBNAIL_MAX_SIZE[0], QR_CODE_MAX_SIZE[1]+PADDING)
 ROW_NEST_MAX_WIDTH = 95 # pixels
 
@@ -110,8 +129,6 @@ ROW_CUSTOMER = (THUMBNAIL_MAX_SIZE[0], ITEM_QUANT[1] + FONT_SIZE + PADDING)
 ROW_CUSTOMER_MAX_WIDTH = floor((LABEL_WIDTH - THUMBNAIL_MAX_SIZE[0]) * (2/3))
 
 ROW_UID = (ROW_CUSTOMER[0] + ROW_CUSTOMER_MAX_WIDTH, ITEM_QUANT[1] + FONT_SIZE + PADDING)
-
-
 
 
 def catch_variable():
@@ -182,11 +199,21 @@ def update_page_info(id, package):
 
 
 def update_nest_page_info(content_dict, label_dict, file_id):
+    """
+    Updates the nest page information with the provided label URL and completion status.
+    Args:
+        content_dict (dict): A dictionary containing the content information for various job representations.
+        label_dict (dict): A dictionary containing the label information.
+        file_id (str): The file identifier used to generate the label URL.
+    Returns:
+        None
+    """
+    
+    
     logger.info("Updating nest page info.")
     
     label_url = f"{FILE_VIEWER_URL.replace('#ID#', file_id)}"
     logger.info(f"Label URL: {label_url}")
-    logging.info(json.dumps(content_dict))
     
     for jobrep in LIST_NAMES:
         logger.info(f"Updating {jobrep} pages with label URL.")
@@ -204,6 +231,7 @@ def update_nest_page_info(content_dict, label_dict, file_id):
                 jobrep_label_url_package['Label URL']['url'] = labels
                 
                 logging.info(f"Updating page {page_id} with {label_url}.")
+                logger.info(json.dumps(jobrep_label_url_package))
                 response = notion.update_page(page_id, jobrep_label_url_package)
                 
     logging.info("Updating nest page with completion status.")
@@ -249,6 +277,16 @@ def process_nest_content(nest_id, jobs, reprints):
 
 
 def generate_qr_code(qr_value, fill_color = 'black', back_color = 'white'):
+    """
+    Generates a QR code with the given value and returns it as an SVG image in a BytesIO object.
+    Args:
+        qr_value (str): The value to encode in the QR code.
+        fill_color (str, optional): The color of the QR code. Defaults to 'black'.
+        back_color (str, optional): The background color of the QR code. Defaults to 'white'.
+    Returns:
+        BytesIO: A BytesIO object containing the SVG image of the generated QR code.
+    """
+    
     logger.info(f"Generating QR code for {qr_value}")
     
     qr = qrcode.QRCode(
@@ -270,6 +308,19 @@ def generate_qr_code(qr_value, fill_color = 'black', back_color = 'white'):
 
 
 def generate_thumbnail(isid, page_id): #isid:internal_storage_id
+    """
+    Generates a thumbnail for the given internal storage ID (isid) and returns the image in memory and its height.
+    Args:
+        isid (str): The internal storage ID of the file to generate a thumbnail for.
+        page_id (str): The page ID associated with the thumbnail.
+    Returns:
+        tuple: A tuple containing:
+            - image_io (BytesIO): The in-memory image file of the generated thumbnail.
+            - image_height (int): The height of the generated thumbnail image.
+    Raises:
+        Exception: If there is an error in downloading the file, opening the image, or saving the image to memory.
+    """
+    
     logger.info(f"Generating thumbnail for {isid}")
     
     source_fh = download_file_from_drive(isid)
@@ -295,6 +346,14 @@ def save_image_to_memory(image):
 
 
 def download_file_from_drive(file_id):
+    """
+    Downloads a file from Google Drive using the given file ID.
+    Args:
+        file_id (str): The ID of the file to be downloaded from Google Drive.
+    Returns:
+        BytesIO: A BytesIO object containing the downloaded file's content.
+    """
+    
     logger.info(f"Downloading file {file_id} from Google Drive.")
     
     request = drive_service.files().get_media(fileId=file_id)
@@ -311,6 +370,19 @@ def download_file_from_drive(file_id):
 
 
 def upload_file_to_drive(file_io, file_name, mime_type, folder_id):
+    """
+    Uploads a file to Google Drive.
+    Args:
+        file_io (io.BytesIO): The file-like object to upload.
+        file_name (str): The name of the file to be uploaded.
+        mime_type (str): The MIME type of the file.
+        folder_id (str): The ID of the Google Drive folder where the file will be uploaded.
+    Returns:
+        str: The ID of the uploaded file if successful, None otherwise.
+    Raises:
+        Exception: If there is an error during the file upload process.
+    """
+    
     logger.info(f"Uploading file {file_name} to Google Drive.")
     
     file_io.seek(0)
@@ -340,19 +412,18 @@ def upload_file_to_drive(file_io, file_name, mime_type, folder_id):
 
 def process_jobrep_content(content_dict):
     """
-    Processes job and reprint content from a given dictionary and generates a list of label dictionaries.
+    Processes job and reprint content from a given content dictionary and generates a list of label dictionaries.
     Args:
-        content_dict (dict): A dictionary containing job and reprint content with nested properties.
+        content_dict (dict): A dictionary containing job and reprint content. The dictionary is expected to have 
+                                keys corresponding to job and reprint names, each containing a list of pages with 
+                                properties.
     Returns:
-        list: A list of dictionaries, each representing a label with various properties such as page_id, 
-              ship_date, order_number, nest_name, quantity, product_description, customer, shipstation_qr_code, 
-              qr_code, thumbnail, thumbnail_height, line_code, uid, and label_urls.
+        list: A list of dictionaries, each representing a label with various properties such as page_id, ship_date, 
+                order_number, nest_name, quantity, product_description, customer, shipstation_qr_code, qr_code, 
+                thumbnail, thumbnail_height, line_code, uid, and label_urls.
     Raises:
-        KeyError: If required keys are missing in the content_dict or its nested properties.
-        AttributeError: If regex matching fails for certain properties.
-        ValueError: If date parsing fails for the ship_date property.
-    """
-    
+        Exception: If there is an error parsing the ship date or any other unexpected error occurs during processing.
+    """    
     
     logger.info("Processing job and reprint content.")
     
@@ -361,6 +432,13 @@ def process_jobrep_content(content_dict):
         content_dict['Nest']['properties']['Name'], content_dict['Nest']['id'])
     nest_name = NEST_NAME_REGEX.match(nest_name).group(1)
     
+    printer_id = notion.return_property_value(
+        content_dict['Nest']['properties']['Device ID'], content_dict['Nest']['id'])
+    if printer_id in EPSON_LIBRARY:
+        printer_name = EPSON_LIBRARY[printer_id]
+    else:
+        printer_name = "N/a"
+    
     # Initialize label_dict with template
     label_dict = []
     label_dict_template = {
@@ -368,6 +446,7 @@ def process_jobrep_content(content_dict):
         'ship_date': None,
         'order_number': None,
         'nest_name': nest_name,
+        'printer_name': printer_name,
         'quantity': None,
         'product_description': None,
         'customer': None,
@@ -406,13 +485,18 @@ def process_jobrep_content(content_dict):
                     single_label_dict['line_code'] = "N/a"
                 
                 try:
-                    ship_date = notion.return_property_value(page_props['Ship date'], page_id)
-                    
-                    if not ship_date:
+                    if 'Ship date' in page_props:
+                        ship_date = notion.return_property_value(page_props['Ship date'], page_id)
+                    else:
                         ship_date = notion.return_property_value(page_props['Ship Date'], page_id)
                         
-                    single_label_dict['ship_date'] = datetime.datetime.strptime(
-                        ship_date, '%Y-%m-%dT%H:%M:%S.%f%z').strftime('%m-%d-%Y')
+                    if ship_date:
+                        single_label_dict['ship_date'] = datetime.datetime.strptime(
+                            ship_date, '%Y-%m-%dT%H:%M:%S.%f%z').strftime('%m-%d-%Y')
+                    else:
+                        logger.error(f"Ship date not found for page {page_id}.")
+                        single_label_dict['ship_date'] = "--"    
+                    
                 except Exception as e:
                     logger.error(f"Error parsing ship date for page {page_id}: {e}", exc_info=True)
                     single_label_dict['ship_date'] = "--"
@@ -454,6 +538,19 @@ def truncate_text(text, max_width, font_name, font_size):
 
 
 def draw_svg_on_canvas(c, svg_io, x, y, max_width, max_height):
+    """
+    Draws an SVG image on a ReportLab canvas with specified maximum width and height.
+    Args:
+        c (Canvas): The ReportLab canvas object where the SVG will be drawn.
+        svg_io (BytesIO): A BytesIO object containing the SVG data.
+        x (float): The x-coordinate on the canvas where the SVG will be drawn.
+        y (float): The y-coordinate on the canvas where the SVG will be drawn.
+        max_width (float): The maximum width for the SVG on the canvas.
+        max_height (float): The maximum height for the SVG on the canvas.
+    Returns:
+        None
+    """
+    
     # Convert the SVG to a ReportLab drawing object
     drawing = svg2rlg(svg_io)
     
@@ -471,10 +568,30 @@ def draw_svg_on_canvas(c, svg_io, x, y, max_width, max_height):
     renderPDF.draw(drawing, c, x, y)
 
 
-def draw_label(c, label, x, y):
+def draw_label(c, label, x, y, notion_logo, shipstation_logo):
     """
-    Draw a single label on the canvas at the specified position.
+    Draws a label on the given canvas at the specified coordinates.
+    Args:
+        c (Canvas): The canvas object to draw on.
+        label (dict): A dictionary containing label information with the following keys:
+            - 'uid' (str): Unique identifier for the label.
+            - 'nest_name' (str): Name of the nest.
+            - 'customer' (str): Customer name.
+            - 'quantity' (int): Item quantity.
+            - 'order_number' (str): Order number.
+            - 'line_code' (str): Job quantity.
+            - 'product_description' (str): Description of the product.
+            - 'ship_date' (str): Shipping date.
+            - 'qr_code' (BytesIO): QR code image data.
+            - 'shipstation_qr_code' (BytesIO): Shipstation QR code image data.
+            - 'thumbnail' (BytesIO): Thumbnail image data.
+            - 'thumbnail_height' (int): Height of the thumbnail image.
+        x (float): The x-coordinate to start drawing the label.
+        y (float): The y-coordinate to start drawing the label.
+    Returns:
+        None
     """
+    
     styles = getSampleStyleSheet()
     styleN = ParagraphStyle(
         'CustomStyle',
@@ -529,17 +646,39 @@ def draw_label(c, label, x, y):
         c.drawImage(ImageReader(thumbnail_io), x + THUMBNAIL_POS[0], y + THUMBNAIL_POS[1] + 
                     ((THUMBNAIL_MAX_SIZE[1] - label['thumbnail_height'])/2),)
         thumbnail_io.close()
+        
+    c.drawImage(notion_logo, x + NOTION_LOGO_POS[0], y + NOTION_LOGO_POS[1], width=LOGO_MAX_SIZE[0], height=LOGO_MAX_SIZE[1])
+    c.drawImage(shipstation_logo,x + SHIPSTATION_LOGO_POS[0], y + SHIPSTATION_LOGO_POS[1], width=LOGO_MAX_SIZE[0], height=LOGO_MAX_SIZE[1])
 
 
 def generate_labels(label_dict):
+    """
+    Generates a PDF containing labels based on the provided label dictionary.
+    Args:
+        label_dict (dict): A dictionary where each key-value pair represents a label's data.
+    Returns:
+        BytesIO: A BytesIO object containing the generated PDF with labels.
+    The function performs the following steps:
+    1. Initializes a BytesIO object to store the PDF in memory.
+    2. Creates a canvas object for drawing the PDF.
+    3. Iterates over the label dictionary to draw each label on the PDF.
+    4. Calculates the position of each label on the page.
+    5. Draws the label on the canvas at the calculated position.
+    6. Adds a header to each page and logs the completion of each page.
+    7. Saves the canvas to the BytesIO object and logs the completion of the PDF generation.
+    """
+    
     logger.info("Generating labels.")
     
     pdf_io = BytesIO()
     
     c = canvas.Canvas(pdf_io, pagesize=letter)
     
+    notion_logo = ImageReader(NOTION_LOGO_PATH)
+    shipstation_logo = ImageReader(SHIPSTATION_LOGO_PATH)
+    
     for index, label in enumerate(label_dict):
-        label_counter = (index + 1) % LABELS_PER_PAGE
+        label_counter = index % LABELS_PER_PAGE
         side_indicator = index % LABEL_COLLUMNS
         
         x_pos = PAGE_LR_MARGIN + ((side_indicator) * LABEL_WIDTH)
@@ -547,11 +686,12 @@ def generate_labels(label_dict):
         
         y_pos = PAGE_TB_MARGIN + ((index % LABEL_ROWS) * LABEL_HEIGHT)
 
-        draw_label(c, label, x_pos, y_pos)
+        draw_label(c, label, x_pos, y_pos, notion_logo, shipstation_logo)
        
         if label_counter == 0:
             c.setFont(LABEL_FONT_BOLD, HEADER_FONT_SIZE)
-            c.drawString(HEADER_PLACEMENT[0], HEADER_PLACEMENT[1], f"MOD Labels")
+            c.drawString(HEADER_PLACEMENT[0], HEADER_PLACEMENT[1], f"{label['nest_name']} - {label['printer_name']}")
+        if label_counter == 9:
             logging.info(f"Page {index//LABELS_PER_PAGE} complete.")
             c.showPage()
        
@@ -576,7 +716,13 @@ def main():
     
     # Get jobs and reprints for nest
     for each, variable in [('Jobs', jobs), ('Reprints', reps)]:
-        variable.extend(notion.return_property_value(nest_properties[each], nest_id))
+        if each in nest_properties:
+            id_list = notion.return_property_value(nest_properties[each], nest_id)
+            logger.info(f"main(): {each} -- {id_list}")
+            if id_list:
+                variable.extend(id_list)
+            else:
+                logger.error(f"No {each} found for nest {nest_id}.")
     
     # If no jobs or reprints found, log error and exit.
     if all([not jobs, not reps]):
@@ -608,6 +754,7 @@ def main():
     update_nest_page_info(content_dict, label_dict, file_id)
     
     logger.info(f"[END] - {unique_id} - Nest ID: {nest_id}")
+    
     
 if __name__ == '__main__':
     logger.info("MOD_Generate_Nest_Labels.py started")
