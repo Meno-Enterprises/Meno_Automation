@@ -12,7 +12,16 @@ Usage:
     The directory to be processed is defined by the DIRECTORY constant.
 """
 
-import os
+import os, logging
+
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.FileHandler('logs/NotionEventListener.log'),
+                        logging.StreamHandler()
+                    ])
+
+logger = logging.getLogger(__name__)
 
 DIRECTORY = 'Z:/Test_Hotfolders'
 
@@ -23,7 +32,9 @@ def remove_files_but_not_folders(directory):
                 continue
             file_path = os.path.join(root, file)
             os.remove(file_path)
-            print(f"Removed file: {file_path}")
+            logger.info(f"Removed file: {file_path}")
 
 if __name__ == "__main__":
+    logger.info(f"[START] Removing files in directory: {DIRECTORY}")
     remove_files_but_not_folders(DIRECTORY)
+    logger.info(f"[END] Files removed successfully.")

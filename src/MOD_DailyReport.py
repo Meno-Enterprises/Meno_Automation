@@ -26,13 +26,22 @@ Job Database:
 from NotionApiHelper import NotionApiHelper
 from AutomatedEmails import AutomatedEmails
 from datetime import datetime, timezone, timedelta
-import csv, os
+import csv, os, logging
 
 print("Starting Daily Report...")
 notion_helper = NotionApiHelper()
 CSV_DIRECTORY = "output"
 CSV_FILE_NAME = os.path.join(CSV_DIRECTORY, f"MOD_Daily_Report_{datetime.now().strftime('%Y-%m-%d')}.csv")
 os.makedirs(CSV_DIRECTORY, exist_ok=True)
+
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.FileHandler('logs/NotionEventListener.log'),
+                        logging.StreamHandler()
+                    ])
+
+logger = logging.getLogger(__name__)
 
 TODAY = datetime.now(timezone.utc)
 
@@ -81,6 +90,8 @@ LATE_JOBS = []
 DAYS_CONSIDERED_LATE = 3
 
 def process_response(notion_response):
+    logger.info("process_response() called.")
+    
     customer_dict = {}
     product_dict = {}
     total_jobs = 0
@@ -120,10 +131,11 @@ def process_response(notion_response):
                     
                     if job_age > DAYS_CONSIDERED_LATE and order_id:
                         if order_id[0] not in LATE_JOBS:
+                            logger.info(f"Order {order_id[0]} added to late jobs.")
                             LATE_JOBS.append(order_id[0])
 
                     if customer not in customer_dict:
-                        print(f"New customer found: {customer}")
+                        logger.info(f"New customer found: {customer}")
                         customer_dict[customer] = {
                             "Total Jobs": 0,
                             "Day 0": 0,
@@ -137,7 +149,7 @@ def process_response(notion_response):
                         }
 
                     if product_id not in product_dict:
-                        print(f"New product found: {product_id}")
+                        logger.info(f"New product found: {product_id}")
                         product_dict[product_id] = {
                             "Total Items": 0,
                             "Day 0": 0,
@@ -161,12 +173,14 @@ def process_response(notion_response):
                         product_dict[product_id][age_label] += 1
                         product_dict[product_id]["Total Reprints"] += reprint_count
         except Exception as e:
-            print(f"Error processing job {jid}: {e}")
-            
+            logger.error(f"Error processing job {jid}: {e}")
+    
+    logger.info("Finished process_response().")
     return product_dict, customer_dict, status_count_dict, total_jobs, total_items
 
 
 def get_order_list(jobs_list):
+    logger.info("get_order_list() called.")
     order_id_list = []
     
     for id in jobs_list:
@@ -183,41 +197,53 @@ def get_order_list(jobs_list):
         
         order_id_list.append((order_id, ship_date, customer, products))
         
+    logger.info("Finished get_order_list().")
     return order_id_list
 
 
 def write_csv_jobs_by_cust(csv_writer, customer_dict, total_jobs):
+    logger.info("write_csv_jobs_by_cust() called.")
     header = ["Customer", "Total Active Jobs", "Day 0", "Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6+", "Shipped Today"]
     csv_writer.writerow(header)
     for customer, data in customer_dict.items():
         row = [customer] + [data["Total Jobs"], data["Day 0"], data["Day 1"], data["Day 2"], data["Day 3"], data["Day 4"], data["Day 5"], data["Day 6+"], data["Shipped Today"]]
         csv_writer.writerow(row)
     csv_writer.writerow(["Total Jobs", total_jobs])
+    
+    logger.info("Finished write_csv_jobs_by_cust().")
 
 
 def write_csv_jobs_by_product(csv_writer, product_dict, total_items):
+    logger.info("write_csv_jobs_by_product() called.")
     csv_writer.writerow(["Product ID", "Total Active Items",  "Day 0", "Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6+", "Total Reprints"])
     for product_id, data in product_dict.items():
         row = [product_id] + [data["Total Items"], data["Day 0"], data["Day 1"], data["Day 2"], data["Day 3"], data["Day 4"], data["Day 5"], data["Day 6+"], data["Total Reprints"]]
         csv_writer.writerow(row)
     csv_writer.writerow(["Total Items", total_items])
+    
+    logger.info("Finished write_csv_jobs_by_product().")
 
 
 def write_csv_status_count(csv_writer, status_count_dict):
+    logger.info("write_csv_status_count() called.")
     csv_writer.writerow(["Job Status", "Jobs Count"])
     for status, count in status_count_dict.items():
         csv_writer.writerow([status, count])
+    logger.info("Finished write_csv_status_count().")
 
 
 def write_csv_late_orders(csv_writer, order_list):
+    logger.info("write_csv_late_orders() called.")
     csv_writer.writerow(['Orders older than 3 days.'])
     csv_writer.writerow(["Order ID", "Ship Date", "Customer", "Products"])
     for order_id, ship_date, customer, products in order_list:
         csv_writer.writerow([order_id, ship_date, customer, products])
+    logger.info("Finished write_csv_late_orders().")
 
 
 def write_csv(customer_dict, product_dict, status_count_dict, order_list, total_jobs, total_items):
-    print(f"Processing finished.\nWriting to CSV {CSV_FILE_NAME}...")
+    logger.info("write_csv() called.")
+    logger.info(f"Writing to CSV {CSV_FILE_NAME}...")
     with open(CSV_FILE_NAME, mode='w', newline='') as csv_file:
         csv_writer = csv.writer(csv_file)
 
@@ -233,10 +259,14 @@ def write_csv(customer_dict, product_dict, status_count_dict, order_list, total_
         
         csv_writer.writerow([])
         
-        write_csv_late_orders(csv_writer, order_list)  
+        write_csv_late_orders(csv_writer, order_list)
+        
+    logger.info("Finished write_csv().")
     
 
 def main():
+    logger.info("main() called.")
+    
     notion_response = notion_helper.query(JOB_DB_ID, content_filter=CONTENT_FILTER)
 
     product_dict, customer_dict, status_count_dict, total_jobs, total_items = process_response(notion_response)
@@ -247,7 +277,11 @@ def main():
     
     automated_emails.send_email(EMAIL_CONFIG_PATH, SUBJECT, BODY, [CSV_FILE_NAME])
     
-    print("End of script.") 
+    logger.info("Finished main().")
+    
+    
     
 if __name__ == "__main__":
+    logger.info("Starting Daily Report...")
     main()
+    logger.info("End of script.") 
