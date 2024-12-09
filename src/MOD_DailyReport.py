@@ -26,7 +26,7 @@ Job Database:
 from NotionApiHelper import NotionApiHelper
 from AutomatedEmails import AutomatedEmails
 from datetime import datetime, timezone, timedelta
-import csv, os, logging
+import csv, os, logging, re
 
 print("Starting Daily Report...")
 notion_helper = NotionApiHelper()
@@ -88,6 +88,7 @@ job_id = []
 status_count_dict = {"Queued": 0, "Nest": 0, "Print": 0, "Production": 0, "Packout": 0, "Complete": 0, "Canceled": 0}
 LATE_JOBS = []
 DAYS_CONSIDERED_LATE = 3
+LATE_DATE_REGEX = r".*(\d{4}-\d{2}-\d{2}).*"
 
 def process_response(notion_response):
     logger.info("process_response() called.")
@@ -182,6 +183,7 @@ def process_response(notion_response):
 def get_order_list(jobs_list):
     logger.info("get_order_list() called.")
     order_id_list = []
+    ship_date_pattern = re.compile(LATE_DATE_REGEX)
     
     for id in jobs_list:
         page_data = notion_helper.get_page(id)
@@ -192,8 +194,17 @@ def get_order_list(jobs_list):
         
         order_id = notion_helper.return_property_value(page_data['properties']['Order number'], id)
         ship_date = notion_helper.return_property_value(page_data['properties']['Ship date'], id)
+        
+        match = ship_date_pattern.search(ship_date)
+        if match:
+            ship_date = match.group(1)
+        
         customer = notion_helper.return_property_value(page_data['properties']['Customer name'], id)
-        products = notion_helper.return_property_value(page_data['properties']['Products'], id).replace(',',' ')
+        products = notion_helper.return_property_value(page_data['properties']['Products'], id)
+        if products:
+            products = products.replace(',',' ')
+        else:
+            products = "Missing product"
         
         order_id_list.append((order_id, ship_date, customer, products))
         
