@@ -1,9 +1,75 @@
 #!/usr/bin/env python3
+'''
+Aria Corona December 9th, 2024
+
+This script generates nest labels for jobs and reprints, processes the content, and uploads the generated labels to Google Drive.
+It interacts with Notion API to fetch and update page information, and uses ReportLab to generate PDF labels.
+Modules:
+    - MOD_Generate_Nest_Labels_Logger: Custom logger for the script.
+    - NotionApiHelper: Helper class for interacting with Notion API.
+    - svglib.svglib: Converts SVG files to ReportLab drawing objects.
+    - PIL: Python Imaging Library for image processing.
+    - io: Core tools for working with streams.
+    - google.oauth2.service_account: Google OAuth2 service account credentials.
+    - googleapiclient.discovery: Google API client library.
+    - googleapiclient.http: HTTP utilities for Google API client.
+    - reportlab.lib.pagesizes: Page size definitions for ReportLab.
+    - reportlab.lib.units: Unit definitions for ReportLab.
+    - reportlab.graphics: Graphics utilities for ReportLab.
+    - reportlab.lib.utils: Utility functions for ReportLab.
+    - reportlab.lib.styles: Style definitions for ReportLab.
+    - reportlab.platypus: High-level layout and document generation for ReportLab.
+    - reportlab.pdfgen: PDF generation utilities for ReportLab.
+    - reportlab.pdfbase: Base utilities for PDF generation in ReportLab.
+    - math: Mathematical functions.
+    - sys: System-specific parameters and functions.
+    - logging: Logging utilities.
+    - datetime: Basic date and time types.
+    - json: JSON encoder and decoder.
+    - qrcode: QR code generation library.
+    - re: Regular expression operations.
+    - uuid: UUID generation library.
+Pip Dependencies:
+    - Pillow
+    - svglib
+    - google-auth
+    - google-auth-oauthlib
+    - google-auth-httplib2
+    - google-api-python-client
+    - reportlab
+    - qrcode[pil]
+    - requests
+    - python-dateutil
+Constants:
+    - Various constants for Notion database IDs, Google Drive folder IDs, PDF generation settings, and label layout settings.
+Functions:
+    - catch_variable(): Retrieves the nest ID from command-line arguments.
+    - report_error(id, error_message): Logs an error message and updates the corresponding page in Notion with the error log.
+    - get_page_info(id): Retrieves page information from Notion.
+    - update_page_info(id, package): Updates page information in Notion.
+    - update_nest_page_info(content_dict, label_dict, file_id): Updates the nest page information with the provided label URL and completion status.
+    - process_nest_content(nest_id, jobs, reprints): Queries the jobs and reprints databases for their page content.
+    - generate_qr_code(qr_value, fill_color, back_color): Generates a QR code with the given value and returns it as an SVG image in a BytesIO object.
+    - generate_thumbnail(isid, page_id): Generates a thumbnail for the given internal storage ID and returns the image in memory and its height.
+    - save_image_to_memory(image, format, quality): Saves an image to memory.
+    - download_file_from_drive(file_id): Downloads a file from Google Drive.
+    - upload_file_to_drive(file_io, file_name, mime_type, folder_id): Uploads a file to Google Drive.
+    - process_jobrep_content(content_dict): Processes job and reprint content from a given content dictionary and generates a list of label dictionaries.
+    - truncate_text(text, max_width, font_name, font_size): Truncates text to fit within a specified width.
+    - draw_svg_on_canvas(c, svg_io, x, y, max_width, max_height): Draws an SVG image on a ReportLab canvas with specified maximum width and height.
+    - draw_label(c, label, x, y, notion_logo, shipstation_logo): Draws a label on the given canvas at the specified coordinates.
+    - load_logo(logo_path): Loads a logo image from the given path.
+    - generate_labels(label_dict): Generates a PDF containing labels based on the provided label dictionary.
+    - main(): Main function that orchestrates the label generation process.
+Usage:
+    Run the script with the nest ID as a command-line argument.
+'''
+
 
 from MOD_Generate_Nest_Labels_Logger import logger
 from NotionApiHelper import NotionApiHelper
 from svglib.svglib import svg2rlg
-from PIL import Image
+from PIL import Image, ImageEnhance
 from io import BytesIO
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -93,39 +159,39 @@ BOLD_FONT_SIZE = 12 # pt
 PADDING = 3
 CENTER_DEVISOR = 5
 
-HEADER_PLACEMENT = (PAGE_LR_MARGIN, PAGE_HEIGHT - PAGE_TB_MARGIN + PADDING)
-HEADER_FONT_SIZE = 24
+HEADER_PLACEMENT = (PAGE_LR_MARGIN, PAGE_HEIGHT - PAGE_TB_MARGIN + (PADDING*2))
+HEADER_FONT_SIZE = 20
 
-THUMBNAIL_MAX_SIZE = (80, 144) # pixels
+THUMBNAIL_MAX_SIZE = (110, 144) # pixels
 THUMBNAIL_POS = (0, 0)
 
 QR_CODE_MAX_SIZE = (floor(LABEL_HEIGHT * (2/5)), floor(LABEL_HEIGHT * (2/5))) # pixels
-QR_CODE_1_POS = (THUMBNAIL_MAX_SIZE[0], 0) 
-QR_CODE_2_POS = (LABEL_WIDTH - QR_CODE_MAX_SIZE[0], 0)
+QR_CODE_1_POS = (THUMBNAIL_MAX_SIZE[0] + PADDING, 0) 
+QR_CODE_2_POS = (LABEL_WIDTH - QR_CODE_MAX_SIZE[0] - PADDING, 0)
 
 LOGO_MAX_SIZE = (20, 20)
 NOTION_LOGO_POS = (QR_CODE_2_POS[0] - LOGO_MAX_SIZE[0] - PADDING, (QR_CODE_MAX_SIZE[1] - LOGO_MAX_SIZE[1]) / 2)
 SHIPSTATION_LOGO_POS = (QR_CODE_1_POS[0] + QR_CODE_MAX_SIZE[0] + PADDING, (QR_CODE_MAX_SIZE[1] - LOGO_MAX_SIZE[1]) / 2)
 
-ROW_NEST = (THUMBNAIL_MAX_SIZE[0], QR_CODE_MAX_SIZE[1]+PADDING)
+ROW_NEST = (THUMBNAIL_MAX_SIZE[0] + PADDING, QR_CODE_MAX_SIZE[1]+PADDING)
 ROW_NEST_MAX_WIDTH = 95 # pixels
 
-SHIP_BY_ROW = (ROW_NEST[0] + ROW_NEST_MAX_WIDTH, QR_CODE_MAX_SIZE[1]+PADDING)
+SHIP_BY_ROW = (ROW_NEST[0] + ROW_NEST_MAX_WIDTH, QR_CODE_MAX_SIZE[1] + PADDING)
 
-PROD_DESCRIPTION = (THUMBNAIL_MAX_SIZE[0], ROW_NEST[1] + BOLD_FONT_SIZE + PADDING)
+PROD_DESCRIPTION = (THUMBNAIL_MAX_SIZE[0] + PADDING, ROW_NEST[1] + BOLD_FONT_SIZE + PADDING)
 PROD_DESCRIPTION_MAX_WIDTH = LABEL_WIDTH - THUMBNAIL_MAX_SIZE[0]
 PROD_DESCRIPTION_MAX_HEIGHT = 30 # pixels
 
-ORDER_NUMBER = (THUMBNAIL_MAX_SIZE[0], PROD_DESCRIPTION[1] + PROD_DESCRIPTION_MAX_HEIGHT + PADDING)
+ORDER_NUMBER = (THUMBNAIL_MAX_SIZE[0] + PADDING, PROD_DESCRIPTION[1] + PROD_DESCRIPTION_MAX_HEIGHT + PADDING)
 ORDER_NUMBER_MAX_WIDTH = LABEL_WIDTH - THUMBNAIL_MAX_SIZE[0]
 
-ITEM_QUANT = (THUMBNAIL_MAX_SIZE[0], ORDER_NUMBER[1] + FONT_SIZE + PADDING)
+ITEM_QUANT = (THUMBNAIL_MAX_SIZE[0] + PADDING, ORDER_NUMBER[1] + FONT_SIZE + PADDING)
 ITEM_QUANT_MAX_WIDTH = floor((LABEL_WIDTH - THUMBNAIL_MAX_SIZE[0]) / 2)
 
 JOB_QUANT = (ITEM_QUANT[0] + ITEM_QUANT_MAX_WIDTH, ORDER_NUMBER[1] + FONT_SIZE + PADDING)
 JOB_QUANT_MAX_WIDTH = ITEM_QUANT_MAX_WIDTH
 
-ROW_CUSTOMER = (THUMBNAIL_MAX_SIZE[0], ITEM_QUANT[1] + FONT_SIZE + PADDING)
+ROW_CUSTOMER = (THUMBNAIL_MAX_SIZE[0] + PADDING, ITEM_QUANT[1] + FONT_SIZE + PADDING)
 ROW_CUSTOMER_MAX_WIDTH = floor((LABEL_WIDTH - THUMBNAIL_MAX_SIZE[0]) * (2/3))
 
 ROW_UID = (ROW_CUSTOMER[0] + ROW_CUSTOMER_MAX_WIDTH, ITEM_QUANT[1] + FONT_SIZE + PADDING)
@@ -326,7 +392,12 @@ def generate_thumbnail(isid, page_id): #isid:internal_storage_id
     source_fh = download_file_from_drive(isid)
     
     with Image.open(BytesIO(source_fh.read())) as image:
-            image.thumbnail(THUMBNAIL_MAX_SIZE, Image.LANCZOS)
+            enhancer = ImageEnhance.Sharpness(image)
+            image = enhancer.enhance(2)
+
+            img_size = (THUMBNAIL_MAX_SIZE[0] * 3, THUMBNAIL_MAX_SIZE[1] * 3)
+            
+            image.thumbnail(img_size, Image.LANCZOS)
             image_height = image.size[1]
             image_io = save_image_to_memory(image)
             #thumbnail_id = upload_file_to_drive(image_io, f'thumbnail_{page_id}.jpg', 'image/jpeg', THUMBNAIL_FOLDER_ID)
@@ -335,11 +406,11 @@ def generate_thumbnail(isid, page_id): #isid:internal_storage_id
     return image_io, image_height
 
 
-def save_image_to_memory(image):
+def save_image_to_memory(image, format='PNG', quality=100):
     logger.info("Saving image to memory.")
     
     image_io = BytesIO()
-    image.save(image_io, format='JPEG')
+    image.save(image_io, format=format, quality=quality)
     image_io.seek(0)
     
     return image_io
@@ -643,13 +714,18 @@ def draw_label(c, label, x, y, notion_logo, shipstation_logo):
     if label['thumbnail']:
         thumbnail_io = BytesIO(label['thumbnail'].getvalue())
         thumbnail_io.seek(0)  
-        c.drawImage(ImageReader(thumbnail_io), x + THUMBNAIL_POS[0], y + THUMBNAIL_POS[1] + 
-                    ((THUMBNAIL_MAX_SIZE[1] - label['thumbnail_height'])/2),)
+        c.drawImage(ImageReader(thumbnail_io), x + THUMBNAIL_POS[0], y + THUMBNAIL_POS[1], width=THUMBNAIL_MAX_SIZE[0], height=THUMBNAIL_MAX_SIZE[1])
         thumbnail_io.close()
         
     c.drawImage(notion_logo, x + NOTION_LOGO_POS[0], y + NOTION_LOGO_POS[1], width=LOGO_MAX_SIZE[0], height=LOGO_MAX_SIZE[1])
     c.drawImage(shipstation_logo,x + SHIPSTATION_LOGO_POS[0], y + SHIPSTATION_LOGO_POS[1], width=LOGO_MAX_SIZE[0], height=LOGO_MAX_SIZE[1])
 
+
+def load_logo(logo_path):
+    with Image.open(logo_path) as logo:
+        logo = logo.convert('RGBA')
+        return ImageReader(logo)
+    
 
 def generate_labels(label_dict):
     """
@@ -674,8 +750,8 @@ def generate_labels(label_dict):
     
     c = canvas.Canvas(pdf_io, pagesize=letter)
     
-    notion_logo = ImageReader(NOTION_LOGO_PATH)
-    shipstation_logo = ImageReader(SHIPSTATION_LOGO_PATH)
+    notion_logo = load_logo(NOTION_LOGO_PATH)
+    shipstation_logo = load_logo(SHIPSTATION_LOGO_PATH)
     
     for index, label in enumerate(label_dict):
         label_counter = index % LABELS_PER_PAGE
