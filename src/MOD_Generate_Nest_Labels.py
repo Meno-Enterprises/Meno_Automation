@@ -394,20 +394,30 @@ def generate_thumbnail(isid, page_id): #isid:internal_storage_id
     with Image.open(BytesIO(source_fh.read())) as image:
             enhancer = ImageEnhance.Sharpness(image)
             image = enhancer.enhance(2)
-
-            img_size = (THUMBNAIL_MAX_SIZE[0] * 3, THUMBNAIL_MAX_SIZE[1] * 3)
             
-            image.thumbnail(img_size, Image.LANCZOS)
             image_height = image.size[1]
+            image_width = image.size[0]
+            
+            
+            
+            if image_height < image_width:
+                thumbnail_size = (THUMBNAIL_MAX_SIZE[0], int(image_height * (THUMBNAIL_MAX_SIZE[0] / image_width)))
+            else:
+                thumbnail_size = (int(image_width * (THUMBNAIL_MAX_SIZE[0] / image_width)), THUMBNAIL_MAX_SIZE[1])
+            
+            image.thumbnail((thumbnail_size[0]*3, thumbnail_size[1]*3), Image.LANCZOS)
+            
             image_io = save_image_to_memory(image)
-            #thumbnail_id = upload_file_to_drive(image_io, f'thumbnail_{page_id}.jpg', 'image/jpeg', THUMBNAIL_FOLDER_ID)
+
     
-    
-    return image_io, image_height
+    return image_io, thumbnail_size
 
 
 def save_image_to_memory(image, format='PNG', quality=100):
     logger.info("Saving image to memory.")
+    
+    if image.mode != 'RGB':
+        image = image.convert('RGB')
     
     image_io = BytesIO()
     image.save(image_io, format=format, quality=quality)
@@ -491,7 +501,7 @@ def process_jobrep_content(content_dict):
     Returns:
         list: A list of dictionaries, each representing a label with various properties such as page_id, ship_date, 
                 order_number, nest_name, quantity, product_description, customer, shipstation_qr_code, qr_code, 
-                thumbnail, thumbnail_height, line_code, uid, and label_urls.
+                thumbnail, thumbnail_size, line_code, uid, and label_urls.
     Raises:
         Exception: If there is an error parsing the ship date or any other unexpected error occurs during processing.
     """    
@@ -524,7 +534,7 @@ def process_jobrep_content(content_dict):
         'shipstation_qr_code': None,
         'qr_code': None,
         'thumbnail': None,
-        'thumbnail_height': THUMBNAIL_MAX_SIZE[1],
+        'thumbnail_size': THUMBNAIL_MAX_SIZE[1],
         'line_code': None,
         'uid': None,
         'label_urls': []
@@ -581,7 +591,7 @@ def process_jobrep_content(content_dict):
                 single_label_dict['label_urls'] = notion.return_property_value(page_props['Label URL'], page_id)
                 
                 # Images and QR codes
-                single_label_dict['thumbnail'], single_label_dict['thumbnail_height'] = generate_thumbnail(
+                single_label_dict['thumbnail'], single_label_dict['thumbnail_size'] = generate_thumbnail(
                     internal_storage_id, page_id)
                 single_label_dict['qr_code'] = generate_qr_code(notion_link)
                 single_label_dict['shipstation_qr_code'] = generate_qr_code(
@@ -656,7 +666,7 @@ def draw_label(c, label, x, y, notion_logo, shipstation_logo):
             - 'qr_code' (BytesIO): QR code image data.
             - 'shipstation_qr_code' (BytesIO): Shipstation QR code image data.
             - 'thumbnail' (BytesIO): Thumbnail image data.
-            - 'thumbnail_height' (int): Height of the thumbnail image.
+            - 'thumbnail_size' (touple): Size of the thumbnail image.
         x (float): The x-coordinate to start drawing the label.
         y (float): The y-coordinate to start drawing the label.
     Returns:
@@ -713,8 +723,11 @@ def draw_label(c, label, x, y, notion_logo, shipstation_logo):
 
     if label['thumbnail']:
         thumbnail_io = BytesIO(label['thumbnail'].getvalue())
-        thumbnail_io.seek(0)  
-        c.drawImage(ImageReader(thumbnail_io), x + THUMBNAIL_POS[0], y + THUMBNAIL_POS[1], width=THUMBNAIL_MAX_SIZE[0], height=THUMBNAIL_MAX_SIZE[1])
+        thumbnail_io.seek(0)
+        
+        ypos = y + THUMBNAIL_POS[1] if label['thumbnail_size'][1] == THUMBNAIL_MAX_SIZE[1] else y + int((LABEL_HEIGHT - label['thumbnail_size'][1]) / 2)
+        
+        c.drawImage(ImageReader(thumbnail_io), x + THUMBNAIL_POS[0], ypos, width=label['thumbnail_size'][0], height=label['thumbnail_size'][1])
         thumbnail_io.close()
         
     c.drawImage(notion_logo, x + NOTION_LOGO_POS[0], y + NOTION_LOGO_POS[1], width=LOGO_MAX_SIZE[0], height=LOGO_MAX_SIZE[1])
@@ -766,7 +779,7 @@ def generate_labels(label_dict):
        
         if label_counter == 0:
             c.setFont(LABEL_FONT_BOLD, HEADER_FONT_SIZE)
-            c.drawString(HEADER_PLACEMENT[0], HEADER_PLACEMENT[1], f"{label['nest_name']} - {label['printer_name']}")
+            c.drawString(HEADER_PLACEMENT[0], HEADER_PLACEMENT[1], f"{label['nest_name']} {label['printer_name']}")
         if label_counter == 9:
             logging.info(f"Page {index//LABELS_PER_PAGE} complete.")
             c.showPage()
@@ -821,8 +834,7 @@ def main():
     # Upload PDF to Google Drive
     filename = f'MOD-{unique_id}_{datetime.datetime.now().strftime("%Y-%m-%d-%H-%M")}.pdf'
     file_id = upload_file_to_drive(pdf_io, filename, 'application/pdf', PDF_FOLDER_ID)
-    copied_id = upload_file_to_drive(pdf_io, filename, 'application/pdf', COPY_FOLDER_ID)
-    
+    #copied_id = upload_file_to_drive(pdf_io, filename, 'application/pdf', COPY_FOLDER_ID)
     # Close PDF in memory
     pdf_io.close()
     
