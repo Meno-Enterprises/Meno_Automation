@@ -46,27 +46,31 @@ PULL_TIMER = 60  # seconds
 WEBHOOK_URL = ''
 
 # idPrinter1 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1B'  # Epson A
-# idPrinter2 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1C'  # Epson B
-ID_PRINTER_1 = 'TUhaRVNtVlNOMnRCYlVWNGF6MHRiR3c2ZHpNfkVwc29uLVN1cmVDb2xvci1GMTAwMDAtRA' # Epson D
-#ID_PRINTER_2 = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1F' # Epson E
-ID_PRINTER_3 = 'T1ZSUU1WcDFVU1k2SmtWQ2VHSnNiR2hKVkc0fkVwc29uLVN1cmVDb2xvci1GMTAwMDAtRg' # Epson F
-ID_PRINTER_2 = 'TUhaRVNtVlNOMnRCYlVWNGF6MHRiR3c2ZHpNfkVwc29uLVN1cmVDb2xvci1GMTAwMDAtRTI'   # Epson E (newer)
-
-# ip1 = '192.168.0.39'  # Master Dell PC IP
-IP1 = '192.168.0.111' # Secondary Dell PC IP
-IP2 = '192.168.0.134' # Temporary PC for Epson F
+ID_PRINTER_4_OLD = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1C'  # Epson B
+ID_PRINTER_4 = 'YlMweWZWZFlJMkZ2Tm1GbWJtYy1hbXM2TnlRfkVwc29uLVN1cmVDb2xvci1GMTAwMDAtQg'
+ID_PRINTER_1_OLD = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1E' # Epson D
+ID_PRINTER_1 = 'YlMweWZWZFlJMkZ2Tm1GbWJtYy1hbXM2TnlRfkVwc29uLVN1cmVDb2xvci1GMTAwMDAtRA'
+ID_PRINTER_3_OLD = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1G' # Epson F
+ID_PRINTER_3 = 'YlMweWZWZFlJMkZ2Tm1GbWJtYy1hbXM2TnlRfkVwc29uLVN1cmVDb2xvci1GMTAwMDAtRg'
+ID_PRINTER_2_OLD = 'bG9jYWxob3N0OjQ1MzQzfmNhbGRlcmFyaXB-RXBzb24tU3VyZUNvbG9yLUYxMDAwMC1F'   # Epson E
+ID_PRINTER_2 = 'YlMweWZWZFlJMkZ2Tm1GbWJtYy1hbXM2TnlRfkVwc29uLVN1cmVDb2xvci1GMTAwMDAtRQ'
+IP2 = '192.168.0.151'  # Master Dell PC IP
+IP1 = '192.168.0.52' # Secondary Dell PC IP
+# IP2 = '192.168.0.134' # Temporary PC for Epson F
 # ip2 = '192.168.0.151'  # Alienware, currently not relevant
 
-ACTIVE_PRINTERS = [(ID_PRINTER_1, IP1), (ID_PRINTER_2, IP1), (ID_PRINTER_3, IP2)]
+ACTIVE_PRINTERS = [(ID_PRINTER_1, IP1), (ID_PRINTER_2, IP1), (ID_PRINTER_3, IP1)]
 
-URL_PRINTER_1 = 'http://' + IP1 + ':12340/v1/jobs?idents.device=' + ID_PRINTER_1 + '&name=Autonest*&sort=idents.internal' \
+URL_PRINTER_1 = 'http://' + IP1 + ':45344/v1/jobs?idents.device=' + ID_PRINTER_1 + '&name=Autonest*&sort=idents.internal' \
+                                                                               ':desc&state=finished&limit=20'
+URL_PRINTER_2 = 'http://' + IP1 + ':45344/v1/jobs?idents.device=' + ID_PRINTER_2 + '&name=Autonest*&sort=idents.internal' \
+                                                                               ':desc&state=finished&limit=20'
+URL_PRINTER_3 = 'http://' + IP1 + ':45344/v1/jobs?idents.device=' + ID_PRINTER_3 + '&name=Autonest*&sort=idents.internal' \
                                                                                ':desc&state=finished&limit=15'
-URL_PRINTER_2 = 'http://' + IP1 + ':12340/v1/jobs?idents.device=' + ID_PRINTER_2 + '&name=Autonest*&sort=idents.internal' \
-                                                                               ':desc&state=finished&limit=15'
-URL_PRINTER_3 = 'http://' + IP2 + ':12340/v1/jobs?idents.device=' + ID_PRINTER_3 + '&name=Autonest*&sort=idents.internal' \
-                                                                               ':desc&state=finished&limit=15'
+URL_PRINTER_4 = 'http://' + IP1 + ':45344/v1/jobs?idents.device=' + ID_PRINTER_4 + '&name=Autonest*&sort=idents.internal' \
+                                                                                 ':desc&state=finished&limit=15'
                                                                                
-URL_DEVICE = 'http://#IPADDRESS#:12340/v1/devices/'                                                        
+URL_DEVICE = 'http://#IPADDRESS#:45344/v1/devices/'                                                        
 
 NEST_DB_ID = '36f1f2e349e147a69468af461c31ab00'
 NEST_DB_FILTER = {"timestamp": "created_time", "created_time": {"past_week": {}}}
@@ -74,13 +78,14 @@ NEST_DB_FILTER = {"timestamp": "created_time", "created_time": {"past_week": {}}
 pullStore1 = {}
 pullStore2 = {}  # If adding additional printers, add more of these variables.
 pullStore3 = {}    
+pullStore4 = {}
                                                                                
 loopCount = 0
 
 with open("conf/Cronitor_API_Key.txt") as file:
     cronitor_api_key = file.read()
 cronitor.api_key = cronitor_api_key
-MONITOR = cronitor.Monitor('Debian10C104 MOD-Caldera API Listener')
+MONITOR = cronitor.Monitor('wsoCXX')
 
 LOG_DIR = "logs"
 log_path = os.path.join(LOG_DIR, "CalderaPullPush.log")
@@ -135,7 +140,7 @@ def catch_value(page, key):
         
     return value
 
-def check_for_nest(name, device, nest_db_data):
+def check_for_nest(name, device, service, nest_db_data, old_printer_id):
     """
     Check for a nest in the Notion database data.
     This function iterates through each page in the provided Notion database data to find a nest
@@ -193,6 +198,7 @@ def check_for_nest(name, device, nest_db_data):
         if all(key in properties for key in ['Name', 'Device ID']):
             nest_name = notion_helper.return_property_value(properties['Name'], page_id)
             device_id = notion_helper.return_property_value(properties['Device ID'], page_id)
+            service_id = notion_helper.return_property_value(properties['Software service ID'], page_id)
             created = page['created_time']
             print_status = notion_helper.return_property_value(properties['Print Status'], page_id)
             
@@ -205,7 +211,7 @@ def check_for_nest(name, device, nest_db_data):
                 continue
             
             # Check if the nest name and device ID match the provided values.
-            if nest_name == name and device_id == device:
+            if nest_name == name and (device_id == device or device_id == old_printer_id) and service_id == service:
                 
                 # Check for the Jobs and Reprints properties in the page.
                 if all(key in properties for key in ['Jobs', 'Reprints']):
@@ -439,9 +445,9 @@ def create_notion_page(caldata, jobs_list_to_send, reps_list_to_send):
     package = {}
     
     # Filter out bad objects from the lists. Ie. pillows on the piecegoods printer.
-    for each in [jobs_list_to_send, reps_list_to_send]:
-        if each:
-            each = filter_bad_objects(each, caldata['device'])
+    #for each in [jobs_list_to_send, reps_list_to_send]:
+    #    if each:
+    #        each = filter_bad_objects(each, caldata['device'])
     
     # If the relation lists are over 100 items, split them into multiple packages.
     if len(jobs_list_to_send) >= 100 or len(reps_list_to_send) >= 100:
@@ -487,14 +493,14 @@ def parse_input(input_list):
             - caldera_job_id_list (list): A list of job IDs extracted from filenames containing 'JOB-'.
             - caldera_rep_id_list (list): A list of report IDs extracted from filenames containing 'REP-'.
     """
-    
     caldera_job_id_list = []
     caldera_rep_id_list = []
     for rip_file in input_list:
         file = catch_value(rip_file, 'file')
-        db_id = parse_filename(file).replace('-', '')
+        db_id = parse_filename(file)
         
         if db_id:
+            db_id = db_id.replace('-', '')
             if 'REP-' in file:
                 caldera_rep_id_list.append(db_id)
             if 'JOB-' in file:
@@ -502,7 +508,7 @@ def parse_input(input_list):
                 
     return caldera_job_id_list, caldera_rep_id_list
 
-def process_data(data, nest_db_data):
+def process_data(data, nest_db_data, old_printer_id):
     """
     Processes the data from Caldera and compares it with the nest database data from Notion.
     Args:
@@ -556,7 +562,7 @@ def process_data(data, nest_db_data):
         caldata['creation'] = catch_value(caldata['evolution'], 'creation')
         
         # Checks notion for nest data
-        nest_page_id, nest_notion_jobs_list, nest_notion_reprints_list, matches_internal = check_for_nest(name, caldata['device'], nest_db_data)
+        nest_page_id, nest_notion_jobs_list, nest_notion_reprints_list, matches_internal = check_for_nest(name, caldata['device'], caldata['idents_service'], nest_db_data, old_printer_id)
         
         # Remove the hyphens from the IDs in the lists.
         nest_notion_jobs_list = fix_list(nest_notion_jobs_list)
@@ -663,12 +669,12 @@ def check_inactive_printers():
                 if each['id'] == printer[0]:
                     if each['state'] != 'running':
                         logger.info(f"Starting printer {printer[0]}.")
-                        putRequest(f"{endpoint}/{printer[0]}/state", "running")
+                        #putRequest(f"{endpoint}/{printer[0]}/state", "running")
                     else:
                         logger.info(f"Printer {printer[0]}: State: {each['state']}")
     
 
-def pullPush(urlPrinter, lastPull, nest_db_data):
+def pullPush(urlPrinter, lastPull, nest_db_data, old_printer_id):
     """
     Pulls data from a specified URL and processes it if there is new data.
     Args:
@@ -688,7 +694,7 @@ def pullPush(urlPrinter, lastPull, nest_db_data):
     
     if lastPull != spoolerJson:
         logger.info("New Caldera data detected, processing...")
-        process_data(spoolerJson, nest_db_data)
+        process_data(spoolerJson, nest_db_data, old_printer_id)
         
     else:
         logger.info("No data change.")
@@ -705,11 +711,13 @@ while True:
     check_inactive_printers()
     
     logger.info(f"Getting Data: {ID_PRINTER_2}")
-    pullStore2 = pullPush(URL_PRINTER_2, pullStore2, nest_db_data) 
+    pullStore2 = pullPush(URL_PRINTER_2, pullStore2, nest_db_data, ID_PRINTER_2_OLD) 
     logger.info(f"Getting Data: {ID_PRINTER_1}")
-    pullStore1 = pullPush(URL_PRINTER_1, pullStore1, nest_db_data)
+    pullStore1 = pullPush(URL_PRINTER_1, pullStore1, nest_db_data, ID_PRINTER_1_OLD)
     logger.info(f"Getting Data: {ID_PRINTER_3}")
-    pullStore3 = pullPush(URL_PRINTER_3, pullStore3, nest_db_data)
+    pullStore3 = pullPush(URL_PRINTER_3, pullStore3, nest_db_data, ID_PRINTER_3_OLD)
+    logger.info(f"Getting Data: {ID_PRINTER_4}")
+    pullStore4 = pullPush(URL_PRINTER_4, pullStore4, nest_db_data, ID_PRINTER_4_OLD)
 
     time.sleep(PULL_TIMER)
     loopCount += 1
