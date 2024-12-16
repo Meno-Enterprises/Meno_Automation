@@ -5,7 +5,7 @@ import logging, sys, re, subprocess, requests
 from datetime import datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseUpload
 from io import BytesIO
 from PIL import Image as PILImage
 
@@ -74,7 +74,7 @@ def get_image_mimetype(image_io):
     except KeyError:
         error_message = f"Error in getting image MIME type: Unsupported image format {format}"
         logger.error(error_message)
-        subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+        subprocess.run(["python", "src/Notion_Error_Reporter.py", page_id, error_message])
 
 def recache_artwork(url, internal_storage_id):
     response = requests.get(url, stream=True)
@@ -84,7 +84,7 @@ def recache_artwork(url, internal_storage_id):
     except requests.exceptions.HTTPError as e:
         error_message = f"Error in recaching artwork: {e}"
         logger.error(error_message, exc_info=True)
-        subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+        subprocess.run(["python", "src/Notion_Error_Reporter.py", page_id, error_message])
     
     file_io = BytesIO()
     
@@ -116,7 +116,7 @@ def main():
         except AttributeError as e:
             error_message = f"Internal storage ID not found for page {page_id}."
             logger.error(error_message, exc_info=True)
-            subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+            subprocess.run(["python", "src/Notion_Error_Reporter.py", page_id, error_message])
 
         log_message = notion_helper.return_property_value(page_data['properties']['Log'], page_id)
         
@@ -130,7 +130,7 @@ def main():
         except:
             error_message = f"Error in recaching artwork for {page_id}"
             logger.error(error_message, exc_info=True)
-            subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+            subprocess.run(["python", "src/Notion_Error_Reporter.py", page_id, error_message])
         
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
         new_message = f"{log_message}{current_time} - MOD_Recache_Artwork.py - Recaching assets."
@@ -144,7 +144,7 @@ def main():
     else:
         error_message = f"Page data not found for {page_id}"
         logger.info(error_message)
-        subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+        subprocess.run(["python", "src/Notion_Error_Reporter.py", page_id, error_message])
 
 if __name__ == "__main__":
     try:
@@ -153,4 +153,4 @@ if __name__ == "__main__":
         error_message = f"MOD_Rechache_Artwork.py - Error in main() recaching artwork: {e}"
         logger.error(error_message, exc_info=True)
         page_id = catch_variable()
-        subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+        subprocess.run(["python", "src/Notion_Error_Reporter.py", page_id, error_message])
