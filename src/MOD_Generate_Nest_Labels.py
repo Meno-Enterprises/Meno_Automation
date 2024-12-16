@@ -553,7 +553,12 @@ def process_jobrep_content(content_dict):
                 
                 # Get internal storage ID to get artwork for thumbnail.
                 internal_storage_id = notion.return_property_value(page_props['Internal storage ID'], page_id)
-                internal_storage_id = INTERNAL_STORAGE_ID_REGEX.match(internal_storage_id).group(1)
+                
+                try:
+                    internal_storage_id = INTERNAL_STORAGE_ID_REGEX.match(internal_storage_id).group(1)
+                except AttributeError as e:
+                    logger.error(f"Internal storage ID not found for page {page_id}.", exc_info=True)
+                    internal_storage_id = "1WaC0UYGN5gSk8gxDPBfSlWUlNhOtXGYo"
                 
                 # Add properties to single_label_dict
                 single_label_dict['page_id'] = page_id
