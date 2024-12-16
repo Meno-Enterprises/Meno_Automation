@@ -83,7 +83,7 @@ from reportlab.platypus import Paragraph
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from math import floor
-import sys, logging, datetime, json, qrcode, re, uuid
+import sys, logging, datetime, json, qrcode, re, uuid, subprocess
 import qrcode.image.svg
 
 
@@ -94,6 +94,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
     logging.StreamHandler()
 ])
 logger = logging.getLogger(__name__)
+
+ERRORHANDLER_COMMAND = ['python', 'src/Notion_Error_Reporter.py']
 
 SERVICE_ACCOUNT_FILE = 'cred/green-campaign-438119-v8-17ab715c7730.json'
 SCOPES = ['https://www.googleapis.com/auth/drive']
@@ -218,15 +220,15 @@ def report_error(id, error_message):
     
     logger.error(f"Error: {error_message}")
     
-    # Get old log, add new log, update page
-    now = datetime.datetime.now()
+    pre = "MOD_Generate_Nest_Labels.py - "
     
-    old_log = notion.get_page_property(id, NEST_LOG_PROP_ID)
-    error_log = f"{now}::{error_message}\n{old_log}" if old_log else f"{now}::{error_message}"
-    log_package = notion.rich_text_prop_gen('Logs', 'rich_text', error_log)
-    package = {**LABEL_ERROR_PACKAGE, **log_package}
+    command = ERRORHANDLER_COMMAND + [id, pre + error_message]
     
-    notion.update_page(id, package)
+    try:
+        subprocess.run(command)
+    except Exception as e:
+        logger.error(f"Error in updating Notion page with error message. {e}", )
+        
     return
 
 
@@ -851,4 +853,19 @@ def main():
     
 if __name__ == '__main__':
     logger.info("MOD_Generate_Nest_Labels.py started")
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        logger.error("KeyboardInterrupt: Exiting.")
+        sys.exit(0)
+    except Exception as e:
+        error_message = f"MOD_Generate_Nest_Labels.py - Error in main(): {e}"
+        logger.error(error_message, exc_info=True)
+        
+        id = catch_variable()
+        
+        command = ERRORHANDLER_COMMAND.copy()
+        command.append(id)
+        command.append(error_message)
+        
+        subprocess.run(command)
