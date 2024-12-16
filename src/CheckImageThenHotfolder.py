@@ -61,10 +61,17 @@ Image correction logic:
 '''
 
 CRONITOR_KEY_PATH = "conf/Cronitor_API_Key.txt"
-PING_CYCLE = 300
+PING_CYCLE = 100
 GC_CYCLE = 3600
-STOP_TIME = '23:55:00' # Time to stop the script
+STOP_TIME = '23:59:00' # Time to stop the script
 PATH = r"\\192.168.0.178\meno\Hotfolders\Hopper"  # Replace with the path to your hotfolder
+
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.FileHandler('logs/hotfolder_handler.log'),
+                        logging.StreamHandler()
+                    ])
 
 
 class HotfolderHandler():
@@ -80,7 +87,8 @@ class HotfolderHandler():
         self.DATABASE_REGEX = r".*_(.*)__\d*"
         self.REPRINT_REGEX = r".*--(REP)-\d*_.*"
         self.EMAIL_ADDRESS_PATTERN = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-        self.ACCEPTED_EXTENSIONS = ['jpg', 'jpeg', 'png']
+        self.DUPLICATE_FILE_REGEX = r".*\(\d{1,4}\).*"
+        self.ACCEPTED_EXTENSIONS = ['jpg', 'jpeg', 'png', 'tif', 'tiff']
         self.DPI_CHANGE_ERROR = 1
         self.IMAGE_RESIZED_ERROR = 2
         self.IMAGE_CROPPED_ERROR = -1
@@ -90,11 +98,14 @@ class HotfolderHandler():
         self.ORDER_PROP_JOB_IDS = r"iLNe"
         self.CUSTOMER_PROP_EMAIL_PRIMARY = r"jtAR"
         self.CUSTOMER_PROP_EMAIL_BACKUP = r"qfs~"
+        
+        self.LABEL_CREATED_PACKAGE = {'Print Status': {'select': {'name': 'Label created'}}}
+        self.JOB_NESTING_PACKAGE = {'Job status': {'select': {'name': 'Nesting'}}}
+        self.REPRINT_NESTING_PACKAGE = {'Reprint status': {'select': {'name': 'Nesting'}}}
+        
         with open(self.CANCELED_ORDER_PATH, 'r') as file:
             self.canceled_orders = file.readlines()
-            
-        logging.basicConfig(filename='logs/hotfolder_handler.log', level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
+              
         warnings.simplefilter('ignore', Image.DecompressionBombWarning) # Suppresses DecompressionBombWarning
         Image.MAX_IMAGE_PIXELS = 600000000     # Ups the max image size to account for large 300DPI images.
 
@@ -105,8 +116,9 @@ class HotfolderHandler():
             files = [f for f in os.listdir(directory_path) if os.path.isfile(os.path.join(directory_path, f))]
             return files
         except Exception as e:
-            print(f"Error accessing directory {directory_path}: {e}")
+            logging.error(f"Error accessing directory {directory_path}: {e}")
             return []
+
 
     def get_image_info(self, image_path):
         print(f"Getting image info for {image_path}.")
@@ -115,9 +127,10 @@ class HotfolderHandler():
             size = image.size
             dpi = image.info.get('dpi')
         except Exception as e:
-            print(f"Error getting image info: {e}")
+            logging.error(f"Error getting image info: {e}")
             return None, -1
         return size, dpi
+    
     
     def adjust_dpi_and_move(self, image, hotfolder, file_name, job_id):
         """
@@ -131,23 +144,24 @@ class HotfolderHandler():
         None
         """
               
-        print(f"Adjusting DPI to 150 and moving to {hotfolder}.")
+        logging.info(f"Adjusting DPI to 150 and moving to {hotfolder}.")
         new_path = f"{self.HOTFOLDER_PATH}/{hotfolder}/{file_name}"
         if os.path.exists(new_path):
-            print(f"File {file_name} already exists in {hotfolder}. Removing old file.")
+            logging.info(f"File {file_name} already exists in {hotfolder}. Removing old file.")
             self.remove_file(new_path)
             time.sleep(5) # Wait for Caldera to recognize the file is gone.        
         image.save(new_path, dpi=(150, 150)) # Force saves the image to 150 DPI. Doesn't actually do anything to the image, just changes the EXIF data
         self.copy_image(job_id, f"{self.HOTFOLDER_PATH}/tmp/{file_name}", new_path)
     
+    
     def resize_image(self, image, hotfolder, image_file_name, target_xpix, target_ypix, original_size, job_id, existing_job_log):
         try:
-            print(f"Resizing image to {target_xpix},{target_ypix} and moving to {hotfolder}.")
+            logging.info(f"Resizing image to {target_xpix},{target_ypix} and moving to {hotfolder}.")
             scale_factor_width = target_xpix / original_size[0]
             scale_factor_height = target_ypix / original_size[1]
             scale_factor = max(scale_factor_width, scale_factor_height)       
             
-            print(f"Scaling image by {scale_factor}.")
+            logging.info(f"Scaling image by {scale_factor}.")
             scaled_image = image.resize(
                 (int(original_size[0] * scale_factor), int(original_size[1] * scale_factor)), Image.LANCZOS
                 ) # Resize image to target size
@@ -158,7 +172,7 @@ class HotfolderHandler():
                 )
 
         except Exception as e:
-            print(f"Critical error resizing image: {e}")
+            logging.error(f"Critical error resizing image: {e}")
             now = time.strftime('%Y-%m-%d %H:%M:%S')
             
             self.report_error(
@@ -171,6 +185,7 @@ class HotfolderHandler():
             )
         pass
 
+
     def crop_and_move(self, image, hotfolder, file_name, target_xpix, target_ypix, job_id, job_log):
         print(f"Checking if image needs to be cropped.")
         try:
@@ -182,19 +197,19 @@ class HotfolderHandler():
             bottom = (image.size[1] + target_ypix) / 2
             
             if left == 0 and top == 0 and right == image.size[0] and bottom == image.size[1]:
-                print(f"Image does not need to be cropped. Saving to {hotfolder}.")
+                logging.info(f"Image does not need to be cropped. Saving to {hotfolder}.")
                 self.save_image(job_id, image, f"{self.HOTFOLDER_PATH}/{hotfolder}/{file_name}", icc_profile)
                 self.copy_image(
                     job_id, f"{self.HOTFOLDER_PATH}/tmp/{file_name}", f"{self.HOTFOLDER_PATH}/{hotfolder}/{file_name}"
                     )
                 
             else:
-                print(f"Image needs to be cropped. Cropping to {target_xpix},{target_ypix}.")
+                logging.info(f"Image needs to be cropped. Cropping to {target_xpix},{target_ypix}.")
                 cropped_image = image.crop((int(left), int(top), int(right), int(bottom)))
                 new_path = f"{self.HOTFOLDER_PATH}/{hotfolder}/{file_name}"
                 
                 self.save_image(job_id, cropped_image, new_path, icc_profile)
-                print(f"Corrected {file_name} image to {target_xpix},{target_ypix} and moved to {hotfolder}.")
+                logging.info(f"Corrected {file_name} image to {target_xpix},{target_ypix} and moved to {hotfolder}.")
                 self.copy_image(job_id, f"{self.HOTFOLDER_PATH}/tmp/{file_name}", new_path)
                 
         except Exception as e:
@@ -207,8 +222,9 @@ class HotfolderHandler():
                 self.STOP_JOB_ERROR
                 )
 
+
     def move_to_hotfolder(self, hotfolder, file_name):
-        print(f"Moving file {file_name} to {hotfolder}.")
+        logging.info(f"Moving file {file_name} to {hotfolder}.")
         new_path = f"{self.HOTFOLDER_PATH}/{hotfolder}/{file_name}"
         current_path = f"{self.HOTFOLDER_PATH}/Hopper/{file_name}"
         
@@ -220,9 +236,10 @@ class HotfolderHandler():
         os.rename(current_path, new_path)
         pass
 
+
     def save_image(self, job_id, image, path, icc_profile = None):
         if os.path.exists(path):
-                    print(f"File already exists in {path}. Removing old file.")
+                    logging.info(f"File already exists in {path}. Removing old file.")
                     self.remove_file(path)
                     time.sleep(5)
         try:
@@ -231,22 +248,24 @@ class HotfolderHandler():
             else:
                 image.save(path, dpi=(150, 150))
                 
-            print(f"Image saved to {path}.")
+            logging.info(f"Image saved to {path}.")
             time.sleep(1)
         except Exception as e:
-            print(f"Error saving image: {e}")
+            logging.error(f"Error saving image: {e}")
             self.report_error(job_id, f"Error saving image: {e}", self.STOP_JOB_ERROR)
         pass
     
+    
     def copy_image(self, job_id, new_path, current_path):
         try:
-            print(f"Copying image to {new_path}.")
+            logging.info(f"Copying image to {new_path}.")
             time.sleep(2)
             shutil.copy(current_path, new_path)
         except Exception as e:
-            print(f"Error copying image: {e}")
+            logging.error(f"Error copying image: {e}")
             self.report_error(job_id, f"Error copying image: {e}", self.STOP_JOB_ERROR)
         pass
+
 
     # Report error to Notion and log file. Report_error will handle writing all errors to the log file.
     def report_error(self, job_id, error_message, level = 0):
@@ -303,8 +322,9 @@ class HotfolderHandler():
         self.notion_helper.update_page(job_id, properties)
         pass
 
+
     def remove_file(self, file_path):
-        print(f"Removing file: {file_path}")
+        logging.info(f"Removing file: {file_path}")
         
         if os.path.exists(file_path):
             os.remove(file_path)
@@ -315,8 +335,9 @@ class HotfolderHandler():
             
         pass
 
+
     def cancel_order(self, order_id, sku, reason_canceled, image_source): # Banking on there not being an order with over 100 jobs. If so, pagination needs to be implemented.
-        print(f"Cancelling order: {order_id}")
+        logging.info(f"Cancelling order: {order_id}")
         canceled_job_list = []
 
         # Generate canceled properties
@@ -373,10 +394,10 @@ class HotfolderHandler():
                               self.STOP_JOB_ERROR)
             
         if len(canceled_job_list) == 0:
-            print(f"No jobs found for order {order_id}.")
+            logging.error(f"No jobs found for order {order_id}.")
             error_prop_body = self.notion_helper.generate_property_body("System status", "select", "Error")
             self.notion_helper.update_page(order_id, error_prop_body)
-        print(f"Canceled Jobs: {canceled_job_list}")
+        logging.info(f"Canceled Jobs: {canceled_job_list}")
 
         # Send cancelation email
         print("Preparing cancelation email...")
@@ -402,6 +423,7 @@ class HotfolderHandler():
         If you have any questions, please contact customer support at ondemand@menoenterprises.com.
         """
         self.automated_emails.send_email(self.TEMP_CONFIG_PATH, subject, body)
+        logging.info(f"Cancelation email sent to {customer_email_list}.")
 
         # Record canceled order in file
         with open(self.CANCELED_ORDER_PATH, 'a') as file:
@@ -411,16 +433,17 @@ class HotfolderHandler():
         logging.info(f"Order {order_id} has been canceled. SKU: {sku}")
         pass
 
+
     def open_image(self, image_path):
         try:
             image = Image.open(image_path)
         except Exception as e:
-            print(f"Error opening image: {e}")
+            logging.error(f"Error opening image: {e}")
             return None
         return image
 
-    def process_new_file(self, file_path):
 
+    def process_new_file(self, file_path):
         # Log the file path
         logging.info(f"Processing new file: {file_path}")
         
@@ -433,9 +456,9 @@ class HotfolderHandler():
             if os.path.exists(file_path) == False: # Loops until the file is finished copying.
                 self.process_new_file(old_path)
                 return None
-
-        if " (1)" in file_path: # If the file is a duplicate, remove it.
-            print(f"File {file_path} is a duplicate. Removing.")
+            
+        if "(1)" in file_path:
+            logging.info(f"File {file_path} is a duplicate. Removing.")
             self.remove_file(file_path)
             return None
 
@@ -452,22 +475,20 @@ class HotfolderHandler():
 
             # Check if database ID is present in file name
             if job_id == None: 
-                print(f"Could not find database ID in {file_name}. Skipping.")
+                logging.error(f"Could not find database ID in {file_name}. Skipping.")
                 return None
 
             # Check if file is an image
             if extension is None or extension.lower() not in self.ACCEPTED_EXTENSIONS: 
-                print(f"File {file_name} is not an accepted image type. Skipping.")
+                logging.info(f"File {file_name} is not an accepted image type. Skipping.")
                 self.report_error(job_id, f"{now} - File {file_name} is not an accepted image type. Skipping.", self.STOP_JOB_ERROR)
                 return None
             
-
-            
         except AttributeError:
-            print(f"Could not find database ID or image extension in {file_name}. Skipping.")
             logging.error(f"Could not find database ID or image extension in {file_name}. Skipping.")
             return None        
        
+        
         # Check if file is a reprint, sends it straight to a hotfolder.
         try:  
             reprint_match = re.search(self.REPRINT_REGEX, file_name, re.IGNORECASE).group(1)
@@ -475,7 +496,7 @@ class HotfolderHandler():
             reprint_match = None
         
         if reprint_match:
-            print(f"File {file_name} is a reprint. Pushing to hotfolder.")
+            logging.info(f"File {file_name} is a reprint. Pushing to hotfolder.")
             reprint_output = self.notion_helper.get_page(job_id)
             job_log = ""
             
@@ -488,6 +509,8 @@ class HotfolderHandler():
                 self.report_error(job_id, f"{job_log}LOG - {now} - Missing reprint info in Notion {job_id}: {e}\nSkipping File.", self.STOP_JOB_ERROR)
                 return None
             
+            # Update reprint status in Notion
+            self.notion_helper.update_page(job_id, self.REPRINT_NESTING_PACKAGE)
             self.move_to_hotfolder(hotfolder, file_name)
             return None
         
@@ -500,11 +523,10 @@ class HotfolderHandler():
             if job_output['properties']['Log']['rich_text']: # Collecting Job Log
                 job_log = job_output['properties']['Log']['rich_text'][0]['plain_text'] + "\n"
         except Exception as e:
-            print(f"Error collecting job log: {e}")
             logging.error(f"Error collecting job log: {e}")
             self.report_error(job_id, f"{job_log}{now} - Error collecting job log: {e}. Critical Error, please notify Aria.", 4)
 
-        try:    # @Aria: Assign job variables here.
+        try:    
             product_id = job_output['properties']['Product']['relation'][0]['id']
             order_number = job_output['properties']['Order ID']['formula']['string']
             order_id = job_output['properties']['Order']['relation'][0]['id']
@@ -515,13 +537,12 @@ class HotfolderHandler():
                 
         except Exception as e: 
             logging.error(f"Could not find image_source, product ID or customer in job {job_id}. Skipping.")
-            print(f"Could not find product ID or customer in job {job_id}. Skipping.")
             self.report_error(job_id, f"{job_log}{now} - Missing product or customer in Notion: {e}", 4)
             self.remove_file(file_path)
             return None
 
         if order_number in self.canceled_orders:
-            print(f"Order {order_number} has been canceled. Skipping.")
+            logging.info(f"Order {order_number} has been canceled. Skipping.")
             self.remove_file(file_path)
             return
         
@@ -530,7 +551,6 @@ class HotfolderHandler():
         try:
             customer_id = customer_id_response['results'][0]['relation']['id']
         except Exception as e:
-            print(f"Error finding customer ID in order {order_id}: {e}")
             logging.error(f"Error finding customer ID in order {order_id}: {e}")
             self.report_error(job_id, f"{job_log}{now} - Error finding customer ID in order {order_id}: {e}", 4)
             self.remove_file(file_path)
@@ -543,9 +563,8 @@ class HotfolderHandler():
             customer_preflight_approval = customer_preflight_approval['select']['name']
             print(customer_preflight_approval)
             allow_alter = int(customer_preflight_approval[0])
-            print(f"Customer {customer_id}:{allow_alter}")
+            logging.info(f"Customer {customer_id}:{allow_alter}")
         except Exception as e:
-            print(f"Error finding customer preflight approval status: {e}")
             logging.error(f"Error finding customer preflight approval status: {e}")
             self.report_error(job_id, f"{job_log}{now} - Error finding customer preflight approval status: {e}", 4)
             self.remove_file(file_path)
@@ -559,7 +578,6 @@ class HotfolderHandler():
             hotfolder = product_output['properties']['Hot Folder']['select']['name']
             sku = product_output['properties']['Product Code']['title'][0]['plain_text']
         except Exception as e:
-            print(f"Missing info for {product_id} in Notion. Skipping. {e}")
             logging.error(f"Missing info for {product_id} in Notion. Skipping. {e}")
             self.report_error(job_id, f"{job_log}{now} - Missing product info in Notion: {e}", 4)
             self.remove_file(file_path)
@@ -572,17 +590,14 @@ class HotfolderHandler():
             self.remove_file(file_path)
             return None
 
-        print(f"Product ID: {product_id}, xpix: {xpix}, ypix: {ypix}, hotfolder: {hotfolder}")
+        logging.info(f"Product ID: {product_id}, xpix: {xpix}, ypix: {ypix}, hotfolder: {hotfolder}")
         size, dpi = self.get_image_info(file_path) # Get image size and DPI
         
         if dpi == -1: # 
-            print(f"Error getting image info for {file_path}. Skipping.")
             logging.error(f"Error getting image info for {file_path}. Skipping.")
             self.report_error(job_id, f"{job_log}{now} - Image file too large. Either an image issue (check this first) or the maximum image size needs to be increased in the preflighting script.", 4)
             self.remove_file(file_path)
             return None
-        
-        print(f"Image size: {size}, DPI: {dpi}")
         
         # Determine which aspect ratio is closer to target aspect ratio.
         if abs(xpix - size[0]) + abs(ypix - size[1]) > abs(xpix - size[1]) + abs(ypix - size[0]): 
@@ -590,12 +605,11 @@ class HotfolderHandler():
         image_aspect = size[0] / size[1]
         target_aspect = xpix / ypix
 
-        print(f"Image size: {size} at {dpi} DPI, AR: {image_aspect}. Target size: {xpix},{ypix} at 150 DPI, AR: {target_aspect}.")
+        logging.info(f"Image size: {size} at {dpi} DPI, AR: {image_aspect}. Target size: {xpix},{ypix} at 150 DPI, AR: {target_aspect}.")
 
         # Check if image aspect ratio is within 5% of target aspect ratio. If not, trash the file and report the error.
         if image_aspect <= target_aspect * 0.95 or image_aspect >= target_aspect * 1.05: 
-            print(f"Image aspect ratio is outsize acceptable fixable range. Reporting and trashing file.")
-            logging.error(f"Image aspect ratio is outside acceptable fixable range.")
+            logging.info(f"Image aspect ratio is outside acceptable fixable range.")
             self.report_error(job_id, f"{job_log}{now} - Image aspect ratio is outside acceptable fixable range.", 3)
             
             if allow_alter == 2:
@@ -611,7 +625,7 @@ class HotfolderHandler():
             (xpix - 38 <= size[1] <= xpix + 38 and ypix - 38 <= size[0] <= ypix + 38)): 
             
             if(dpi != (150, 150)): # Correct Size, but DPI is wrong. Adjust DPI and move to hotfolder.
-                print(f"Image size matches target size, but DPI does not. Adjusting DPI to 150 and moving to {hotfolder}.")
+                logging.info(f"Image size matches target size, but DPI does not. Adjusting DPI to 150 and moving to {hotfolder}.")
                 image = self.open_image(file_path)
                 self.adjust_dpi_and_move(image, hotfolder, file_name, job_id)
                 self.report_error(job_id, f"{job_log}{now} - Image DPI {dpi} does not match target DPI. Adjusting to 150 DPI and moving to hotfolder.", 1)            
@@ -619,12 +633,12 @@ class HotfolderHandler():
                 return None
             
             else: # Image is correct size and DPI
-                print(f"Image size and DPI match target size. Moving to {hotfolder}.")
+                logging.info(f"Image size and DPI match target size. Moving to {hotfolder}.")
                 self.move_to_hotfolder(hotfolder, file_name)
                 return None
             
         elif(allow_alter == 1): # Image size does not match target size. Resize and move to hotfolder.
-            print(f"Image size does not match target size. Resizing and moving to {hotfolder}.")
+            logging.info(f"Image size does not match target size. Resizing and moving to {hotfolder}.")
             image = self.open_image(file_path)
             self.resize_image(image, hotfolder, file_name, xpix, ypix, size, job_id, job_log)
             self.report_error(job_id,
@@ -634,7 +648,7 @@ class HotfolderHandler():
             return None
         
         elif(allow_alter == 3): # Image size does not match target size. Crop and move to hotfolder.
-            print(f"Image size does not match target size. Cropping and moving to {hotfolder}.")
+            logging.info(f"Image size does not match target size. Cropping and moving to {hotfolder}.")
             image = self.open_image(file_path)
             self.crop_and_move(image, hotfolder, file_name, xpix, ypix, job_id, job_log)
             self.report_error(job_id, f"{job_log}{now} - Image size {size} does not match target size ({xpix},{ypix})."+
@@ -642,7 +656,6 @@ class HotfolderHandler():
             self.remove_file(file_path) # Remove original file
         
         else: # Image size does not match target size at 150DPI. Cancel order and trash file.
-            print(f"Image size does not match target size. Trashing file.")
             logging.info(f"Image size does not match target size. Cancelling order.")
             self.report_error(job_id, f"{job_log}{now} - Image size does not match target size at 150DPI. Customer not on approved preflight list. Canceling jobs and order.", 3)
             self.remove_file(file_path)
@@ -669,10 +682,9 @@ if __name__ == "__main__":
     cronitor.api_key = cronitor_api_key
     MONITOR = cronitor.Monitor("MOD Preflight Script")
     MONITOR.ping(state='run')
-    print(f"Monitoring directory: {PATH}")
+    logging.info(f"Monitoring directory: {PATH}")
     tick = 0
  
-    
     try:
         while True:
             tick += 1
@@ -694,7 +706,7 @@ if __name__ == "__main__":
             
             now = time.strftime('%H:%M:%S')
             if now >= STOP_TIME:
-                print(f"Time is after {STOP_TIME} EST. Stopping the observer.")
+                logging.info(f"Time is after {STOP_TIME} EST. Stopping the observer.")
                 MONITOR.ping(state='complete')
                 break
      
@@ -702,5 +714,5 @@ if __name__ == "__main__":
         MONITOR.ping(state='complete')
 
     except Exception as e:
-        print(f"Critical Error: {e}")
+        logging.error(f"Critical Error: {e}")
         MONITOR.ping(state='fail')
