@@ -95,7 +95,7 @@ def cancel_jobs(job_list, order_number, original_job_id):
         except:
             error_message = f"MOD_Sync_Cancelations.py - Error canceling job {job_id}"
             logger.error(error_message)
-            subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+            subprocess.run(["python", "src/Notion_Error_Reporter.py", page_id, error_message])
         return
 
 
@@ -112,7 +112,7 @@ def cancel_from_order(page_data, page_id):
     if not job_list:
         error_message = f"MOD_Sync_Cancelations.py - Job list not found for order {page_id}"
         logger.error(error_message)
-        subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+        subprocess.run(["python", "src/Notion_Error_Reporter.py", page_id, error_message])
         return
     
     order_number = notion_helper.return_property_value(order_properties['Order number'], page_id)
@@ -135,7 +135,7 @@ def cancel_from_job(page_data, page_id):
         except:
             error_message = f"MOD_Sync_Cancelations.py - Error canceling order {order_id}"
             logger.error(error_message)
-            subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+            subprocess.run(["python", "src/Notion_Error_Reporter.py", page_id, error_message])
         return
                 
                 
@@ -151,7 +151,7 @@ def cancel_from_job(page_data, page_id):
     if not order_id:
         error_message = f"MOD_Sync_Cancelations.py - Order ID not found for job {page_id}"
         logger.error(error_message)
-        subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+        subprocess.run(["python", "src/Notion_Error_Reporter.py", page_id, error_message])
         return
     
     order_id = order_id[0].strip()
@@ -160,7 +160,7 @@ def cancel_from_job(page_data, page_id):
     if not order_page:
         error_message = f"MOD_Sync_Cancelations.py - Order page not found for {order_id}"
         logger.error(error_message)
-        subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+        subprocess.run(["python", "src/Notion_Error_Reporter.py", page_id, error_message])
         return
     
     order_status = notion_helper.return_property_value(order_page['properties']['Status'], order_id)    
@@ -174,7 +174,7 @@ def cancel_from_job(page_data, page_id):
     if not job_list:
         error_message = f"MOD_Sync_Cancelations.py - Job list not found for order {order_id}"
         logger.error(error_message)
-        subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+        subprocess.run(["python", "src/Notion_Error_Reporter.py", page_id, error_message])
         return
     
     cancel_jobs(job_list, order_number, page_id)
@@ -198,13 +198,13 @@ def process_page(page_data):
         else:
             error_message = f"MOD_Sync_Cancelations.py - Valid database ID missing from system configuration for {page_id}."
             logger.error(f"Page {page_id} is not in a valid database")
-            subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+            subprocess.run(["python", "src/Notion_Error_Reporter.py", page_id, error_message])
             return
         
     else:
         error_message = f"MOD_Sync_Cancelations.py - Page data not found for {page_id}."
         logger.info(error_message)
-        subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+        subprocess.run(["python", "src/Notion_Error_Reporter.py", page_id, error_message])
         
     pass
 
@@ -228,6 +228,6 @@ if __name__ == "__main__":
         page_id = catch_variable()
         error_message = f"MOD_Sync_Cancelations.py - Error in main: {e}"
 
-        subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+        subprocess.run(["python", "src/Notion_Error_Reporter.py", page_id, error_message])
 
         logger.error("[End]")
