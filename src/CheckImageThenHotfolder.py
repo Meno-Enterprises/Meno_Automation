@@ -7,11 +7,13 @@ import time, os, re, shutil, cronitor, gc
 # from watchdog.events import FileSystemEventHandler
 from NotionApiHelper import NotionApiHelper
 from AutomatedEmails import AutomatedEmails
+from datetime import datetime
 from pathlib import Path
 from PIL import Image
 import json
 import logging
 import warnings
+import subprocess
 
 '''
 Dependencies:
@@ -287,7 +289,18 @@ class HotfolderHandler():
         """
         properties = {}
         
-        logs = self.notion_helper.generate_property_body("Log", "rich_text", [error_message])
+        NOW = datetime.now().strftime('%Y-%m-%d %H:%M')
+        
+        page_data = self.notion_helper.get_page(job_id)
+
+        if not page_data:
+            logging.error(f"Error finding job {job_id}.")
+            return
+        
+        old_log = self.notion_helper.return_property_value(page_data['properties']['Log'], job_id)
+        new_log = f"{old_log}\n{NOW} - {error_message}" if old_log else f"{NOW} - {error_message}"
+        
+        logs = self.notion_helper.generate_property_body("Log", "rich_text", [new_log])
         
         if level == self.DPI_CHANGE_ERROR:
             tags = self.notion_helper.generate_property_body("Tags", "multi_select", ["DPI Changed", "OOS"]) 
@@ -317,7 +330,6 @@ class HotfolderHandler():
             system_status = self.notion_helper.generate_property_body("System status", "select", "Error")
             properties = {"Log": logs["Log"], "System status": system_status["System status"]} 
             
-        print(f"End Reporting error for job {job_id}: {error_message}")
         logging.error(f"Error for job {job_id}: {error_message}")
         self.notion_helper.update_page(job_id, properties)
         pass
@@ -513,6 +525,9 @@ class HotfolderHandler():
             self.notion_helper.update_page(job_id, self.REPRINT_NESTING_PACKAGE)
             self.move_to_hotfolder(hotfolder, file_name)
             return None
+        
+        # Update job status in Notion
+        self.notion_helper.update_page(job_id, self.JOB_NESTING_PACKAGE)
         
         # Get job information from Notion
         print("Querying Notion API for job information...")
