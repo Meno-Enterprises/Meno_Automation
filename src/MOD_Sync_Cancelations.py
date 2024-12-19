@@ -224,17 +224,10 @@ if __name__ == "__main__":
         logger.error("Keyboard interrupt")
         sys.exit(0)    
     except Exception as e:
-        logger.error(f"Error in main: {e}")
+        logger.error(f"Error in main: {e}", exc_info=True)
         page_id = catch_variable()
-        
-        page = notion_helper.get_page(page_id)
-        existing_log = notion_helper.return_property_value(page['properties']['Log'], page_id)
-        current_time = datetime.now().strftime("%m-%d-%Y:%H-%M")
-        logger.error(f"Error occurred at {current_time}")
+        error_message = f"MOD_Sync_Cancelations.py - Error in main: {e}"
 
-        error_status = notion_helper.selstat_prop_gen("System status", "select", "Error")
-        error_message = notion_helper.rich_text_prop_gen("Log", "rich_text", [f"{existing_log}\n{current_time} - Error in MOD_Check_For_Folder_ID.py:\n{str(e)}"])
-        
-        package = {**error_status, **error_message}
-        notion_helper.update_page(page_id, package)
+        subprocess.run(["python3", "src/Notion_Error_Reporter.py", page_id, error_message])
+
         logger.error("[End]")
